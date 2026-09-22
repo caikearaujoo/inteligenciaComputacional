@@ -1,0 +1,17 @@
+TEMA: 
+Inteligência Computacional Aplicada à Agricultura (Recomendação de Plantio)
+
+INTRODUÇÃO:
+O avanço da agricultura de precisão tem exigido ferramentas tecnológicas cada vez mais robustas para apoiar a tomada de decisão no campo. O sucesso de uma colheita depende diretamente de fatores químicos do solo e das condições meteorológicas da região. Neste cenário, a Inteligência Computacional oferece métodos capazes de aprender padrões complexos a partir de dados históricos, permitindo prever cenários e otimizar o uso da terra agrícola.
+
+IDEIA A RESOLVER (PROBLEMA):
+Muitas vezes, a escolha de qual cultura agrícola plantar em um determinado terreno é feita com base na intuição empírica ou em conhecimentos gerais da região, o que pode levar a um uso ineficiente do solo, desperdício de insumos (como fertilizantes) e, consequentemente, baixa produtividade. A dificuldade está em cruzar múltiplas variáveis simultaneamente (níveis de Nitrogênio, Fósforo, Potássio, além de temperatura, umidade, pH e volume de chuva) para identificar, com precisão, a espécie botânica com maior probabilidade de adaptação e sucesso financeiro.
+
+OBJETIVO:
+O objetivo deste projeto é desenvolver, treinar e validar uma Rede Neural Artificial (do tipo Multi-Layer Perceptron) capaz de atuar como um sistema de recomendação multiclasse. O modelo receberá como dados de entrada as condições físico-químicas e climáticas de um terreno e deverá classificar e recomendar qual é a cultura agrícola (ex: café, milho, arroz, etc.) mais adequada para o plantio. 
+
+METODOLOGIA BÁSICA:
+- Utilização de um dataset estruturado e balanceado ("Crop Recommendation Dataset").
+- Aplicação de técnicas de pré-processamento (normalização dos dados de clima e solo).
+- Treinamento da rede utilizando funções de ativação adequadas (como ReLU e Softmax) e otimizadores padrão da disciplina.
+- Avaliação do desempenho da rede por meio do cálculo de erro e geração de uma Matriz de Confusão.
