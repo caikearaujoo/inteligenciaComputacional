@@ -1,0 +1,12 @@
+# Notas/histórico de desenvolvimento com IA (não subir pro repositório do professor)
+trabalhoFinal/CLAUDE.md
+trabalhoFinal/TrabalhoFinal.md
+
+# Dataset (baixado localmente, não versionar)
+trabalhoFinal/dados/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
