@@ -1,9 +1,14 @@
 # Notas/histórico de desenvolvimento com IA (não subir pro repositório do professor)
 trabalhoFinal/CLAUDE.md
 trabalhoFinal/TrabalhoFinal.md
+desafios/desafio2/desafio2.md
 
 # Dataset (baixado localmente, não versionar)
 trabalhoFinal/dados/
+desafios/desafio2/dados/
+
+# Cache do harness do Desafio 2 (baseline/referência, regenerável)
+desafios/desafio2/calibracao_d2.json
 
 # Python
 __pycache__/

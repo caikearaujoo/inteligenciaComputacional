@@ -11,6 +11,7 @@ A rede neural (MLP) entra em uma etapa seguinte.
 
 import numpy as np
 import pandas as pd
+from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -49,6 +50,90 @@ def dividir_treino_teste(X, y, proporcao_teste=0.2, semente=42):
         stratify=y,
     )
     return X_treino, X_teste, y_treino, y_teste
+
+
+def aplicar_smote(X_treino, y_treino, fator_multiplicacao=4, k_neighbors=5, semente=42):
+    """
+    Aumenta o treino com exemplos sinteticos via SMOTE, so no treino
+    (nunca no teste, senao a validacao fica contaminada com dados
+    sinteticos "vazando" pra avaliacao).
+
+    Como o SMOTE cria exemplos interpolando entre um ponto e seus k
+    vizinhos mais proximos DA MESMA CLASSE, a distancia usada pra achar
+    esses vizinhos precisa ser justa entre as features - por isso
+    padronizamos antes de rodar o SMOTE (senao rainfall, que varia em
+    dezenas/centenas, dominaria a distancia sobre ph, que varia entre 3 e 10)
+    e desfazemos a padronizacao depois, devolvendo os dados na escala
+    original para o resto do pipeline (phi, normalizacao final) seguir
+    igual ao fluxo sem SMOTE.
+
+    fator_multiplicacao=4 significa: cada classe passa a ter ~4x mais
+    exemplos no treino (100 amostras/classe no treino original ~= 80
+    depois do split -> ~320 depois do SMOTE).
+    """
+    scaler_smote = StandardScaler()
+    X_treino_escalado = scaler_smote.fit_transform(X_treino)
+
+    contagem_atual = y_treino.value_counts()
+    estrategia_amostragem = {
+        classe: int(round(contagem * fator_multiplicacao))
+        for classe, contagem in contagem_atual.items()
+    }
+
+    smote = SMOTE(
+        sampling_strategy=estrategia_amostragem,
+        k_neighbors=k_neighbors,
+        random_state=semente,
+    )
+    X_aumentado_escalado, y_aumentado = smote.fit_resample(X_treino_escalado, y_treino)
+
+    X_aumentado_array = scaler_smote.inverse_transform(X_aumentado_escalado)
+    X_treino_aumentado = pd.DataFrame(X_aumentado_array, columns=X_treino.columns)
+    y_treino_aumentado = pd.Series(y_aumentado, name=y_treino.name)
+
+    return X_treino_aumentado, y_treino_aumentado
+
+
+def validar_smote(X_original, y_original, X_aumentado, y_aumentado):
+    """
+    Validacoes de sanidade sobre os dados sinteticos gerados pelo SMOTE:
+
+    1. Todas as classes devem ter o mesmo numero de exemplos antes e
+       depois (garante que o fator de multiplicacao foi aplicado
+       igualmente, sem favorecer nenhuma cultura).
+    2. Nenhum valor deve ficar fora dos limites fisicos minimos (N, P, K,
+       umidade, chuva, ph nao podem ser negativos) - como o SMOTE so
+       interpola entre pontos reais (combinacao convexa), isso deveria
+       valer sempre, mas testamos explicitamente.
+    3. Media e desvio padrao por classe antes/depois devem ficar
+       proximos (o SMOTE nao deveria distorcer o "centro" da nuvem de
+       pontos de cada cultura).
+    """
+    print("\n--- Validacao do SMOTE ---")
+
+    contagem_antes = y_original.value_counts()
+    contagem_depois = y_aumentado.value_counts()
+    print(f"Classes antes: {len(contagem_antes)} | depois: {len(contagem_depois)}")
+    print(f"Exemplos antes: {contagem_antes.sum()} | depois: {contagem_depois.sum()}")
+
+    tamanhos_iguais_por_classe = contagem_depois.nunique() == 1
+    print(f"Todas as classes com o mesmo tamanho depois do SMOTE? {tamanhos_iguais_por_classe}")
+
+    colunas_nao_negativas = ["N", "P", "K", "humidity", "rainfall", "ph"]
+    minimos = X_aumentado[colunas_nao_negativas].min()
+    valores_negativos = (minimos < 0).any()
+    print(f"Algum valor negativo em colunas fisicamente nao-negativas? {valores_negativos}")
+    if valores_negativos:
+        raise ValueError(f"SMOTE gerou valores negativos invalidos:\n{minimos}")
+
+    medias_antes = X_original.assign(label=y_original).groupby("label").mean()
+    medias_depois = X_aumentado.assign(label=y_aumentado).groupby("label").mean()
+    diferenca_media_relativa = (
+        (medias_depois - medias_antes).abs() / medias_antes.abs()
+    ).mean().mean()
+    print(f"Diferenca media relativa (media por classe, antes vs depois): {diferenca_media_relativa:.4f}")
+
+    print("--- Fim da validacao ---\n")
 
 
 def phi(X):
@@ -133,10 +218,10 @@ def checar_nan_inf(X, nome_conjunto):
     print(f"{nome_conjunto}: nenhum valor NaN ou Inf encontrado.")
 
 
-def executar_pipeline(caminho_csv):
+def executar_pipeline(caminho_csv, usar_smote=True, fator_multiplicacao_smote=4):
     """
     Executa o pipeline completo:
-    carregar -> dividir -> aplicar phi -> normalizar -> checar dados.
+    carregar -> dividir -> [SMOTE no treino] -> aplicar phi -> normalizar -> checar dados.
     """
     print("1. Carregando dados...")
     X, y = carregar_dados(caminho_csv)
@@ -145,6 +230,15 @@ def executar_pipeline(caminho_csv):
     print("2. Dividindo em treino (80%) e teste (20%)...")
     X_treino, X_teste, y_treino, y_teste = dividir_treino_teste(X, y)
     print(f"   Treino: {X_treino.shape[0]} amostras | Teste: {X_teste.shape[0]} amostras")
+
+    if usar_smote:
+        print(f"2.1. Aplicando SMOTE no treino (fator {fator_multiplicacao_smote}x)...")
+        X_treino_original, y_treino_original = X_treino, y_treino
+        X_treino, y_treino = aplicar_smote(
+            X_treino, y_treino, fator_multiplicacao=fator_multiplicacao_smote
+        )
+        print(f"   Treino depois do SMOTE: {X_treino.shape[0]} amostras")
+        validar_smote(X_treino_original, y_treino_original, X_treino, y_treino)
 
     print("3. Aplicando phi(X) - expansao de caracteristicas...")
     X_treino_phi = phi(X_treino)
