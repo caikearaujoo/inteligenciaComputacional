@@ -116,16 +116,21 @@ def normalizar_dados(X_treino, X_teste):
 
 def checar_nan_inf(X, nome_conjunto):
     """
-    Verificacao de seguranca: confirma que nao existem valores
+    Verificacao de seguranca: garante que nao existem valores
     NaN ou infinitos depois das transformacoes.
+
+    Se encontrar algum valor invalido, interrompe a execucao com
+    ValueError em vez de so avisar, para nao deixar a rede neural
+    receber dados corrompidos (mesmo rigor do harness do Desafio 1,
+    que usa assert para o mesmo fim).
     """
     tem_nan = X.isna().any().any()
     tem_inf = np.isinf(X.to_numpy()).any()
 
     if tem_nan or tem_inf:
-        print(f"ATENCAO: valores invalidos encontrados em {nome_conjunto}!")
-    else:
-        print(f"{nome_conjunto}: nenhum valor NaN ou Inf encontrado.")
+        raise ValueError(f"Valores invalidos (NaN/Inf) encontrados em {nome_conjunto}!")
+
+    print(f"{nome_conjunto}: nenhum valor NaN ou Inf encontrado.")
 
 
 def executar_pipeline(caminho_csv):
