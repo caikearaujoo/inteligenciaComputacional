@@ -10,6 +10,13 @@ desafios/desafio2/dados/
 # Cache do harness do Desafio 2 (baseline/referência, regenerável)
 desafios/desafio2/calibracao_d2.json
 
+# Ferramenta interna pra gerar o slide (não é parte da entrega)
+desafios/desafio2/gerar_slide.py
+
+# Testes de curiosidade, não entregáveis
+desafios/desafio2/_teste_leaky_relu.py
+desafios/desafio2/_resultado_teste_leaky.log
+
 # Python
 __pycache__/
 *.pyc

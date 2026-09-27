@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
 COLUNAS_ENTRADA = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"]
@@ -199,6 +199,23 @@ def normalizar_dados(X_treino, X_teste):
     return X_treino_normalizado, X_teste_normalizado, scaler
 
 
+def codificar_rotulo(y_treino, y_teste):
+    """
+    Converte o rotulo de texto ("rice", "maize", ...) para inteiros
+    (0 a 21), que e o formato que a MLP com Softmax/CrossEntropy espera.
+
+    O LabelEncoder e ajustado (fit) so no treino, seguindo a mesma regra
+    de nao vazar informacao do teste - mas como as 22 classes aparecem
+    garantidamente nos dois conjuntos (o split e estratificado), isso nao
+    tem risco pratico de o teste conter uma classe "desconhecida" pelo
+    encoder.
+    """
+    encoder = LabelEncoder()
+    y_treino_cod = encoder.fit_transform(y_treino)
+    y_teste_cod = encoder.transform(y_teste)
+    return y_treino_cod, y_teste_cod, encoder
+
+
 def checar_nan_inf(X, nome_conjunto):
     """
     Verificacao de seguranca: garante que nao existem valores
@@ -252,17 +269,21 @@ def executar_pipeline(caminho_csv, usar_smote=True, fator_multiplicacao_smote=4)
     checar_nan_inf(X_treino_final, "treino")
     checar_nan_inf(X_teste_final, "teste")
 
+    print("6. Codificando rotulo (texto -> inteiro 0-21)...")
+    y_treino_cod, y_teste_cod, encoder_rotulo = codificar_rotulo(y_treino, y_teste)
+    print(f"   Classes: {len(encoder_rotulo.classes_)}")
+
     print("\nPipeline concluido.")
     print(f"Formato final treino: {X_treino_final.shape}")
     print(f"Formato final teste : {X_teste_final.shape}")
 
-    return X_treino_final, X_teste_final, y_treino, y_teste, scaler
+    return X_treino_final, X_teste_final, y_treino_cod, y_teste_cod, scaler, encoder_rotulo
 
 
 if __name__ == "__main__":
     CAMINHO_DATASET = "dados/Crop_recommendation.csv"
 
-    X_treino, X_teste, y_treino, y_teste, scaler = executar_pipeline(CAMINHO_DATASET)
+    X_treino, X_teste, y_treino, y_teste, scaler, encoder_rotulo = executar_pipeline(CAMINHO_DATASET)
 
     print("\nPrimeiras linhas do treino ja processado:")
     print(X_treino.head())
