@@ -1,17 +1,24 @@
-TEMA: 
-Inteligência Computacional Aplicada à Agricultura (Recomendação de Plantio)
+TEMA:
+Inteligência Computacional Aplicada à Agricultura (Previsão de Produtividade e Apoio à Decisão de Plantio)
 
 INTRODUÇÃO:
-O avanço da agricultura de precisão tem exigido ferramentas tecnológicas cada vez mais robustas para apoiar a tomada de decisão no campo. O sucesso de uma colheita depende diretamente de fatores químicos do solo e das condições meteorológicas da região. Neste cenário, a Inteligência Computacional oferece métodos capazes de aprender padrões complexos a partir de dados históricos, permitindo prever cenários e otimizar o uso da terra agrícola.
+O avanço da agricultura de precisão tem exigido ferramentas tecnológicas cada vez mais robustas para apoiar a tomada de decisão no campo. O sucesso de uma colheita depende diretamente de fatores do solo, do clima da região e do manejo de insumos. Neste cenário, a Inteligência Computacional oferece métodos capazes de aprender padrões complexos a partir de dados históricos, permitindo prever cenários e otimizar o uso da terra agrícola.
 
 IDEIA A RESOLVER (PROBLEMA):
-Muitas vezes, a escolha de qual cultura agrícola plantar em um determinado terreno é feita com base na intuição empírica ou em conhecimentos gerais da região, o que pode levar a um uso ineficiente do solo, desperdício de insumos (como fertilizantes) e, consequentemente, baixa produtividade. A dificuldade está em cruzar múltiplas variáveis simultaneamente (níveis de Nitrogênio, Fósforo, Potássio, além de temperatura, umidade, pH e volume de chuva) para identificar, com precisão, a espécie botânica com maior probabilidade de adaptação e sucesso financeiro.
+Muitas vezes, a decisão sobre o que plantar e quanto investir em insumos é feita com base na intuição empírica, o que pode levar a um uso ineficiente do solo, desperdício de fertilizantes e, consequentemente, baixa produtividade. A dificuldade está em cruzar múltiplas variáveis simultaneamente (região, safra, volume de chuva, dose de fertilizante e pesticida por hectare, área cultivada) para antecipar se uma determinada cultura tende a render bem ou mal naquelas condições.
+
+Uma observação metodológica importante, que orientou a definição do problema: tentamos inicialmente prever "qual cultura o agricultor plantou" a partir das condições do terreno. Medindo os dados, constatamos que essa relação é fraca em dados reais — a escolha da cultura é uma decisão humana (tradição, mercado, semente disponível), não uma consequência física do solo. Já a produtividade É determinada pelas condições, e por isso é um alvo que a rede consegue de fato aprender.
 
 OBJETIVO:
-O objetivo deste projeto é desenvolver, treinar e validar uma Rede Neural Artificial (do tipo Multi-Layer Perceptron) capaz de atuar como um sistema de recomendação multiclasse. O modelo receberá como dados de entrada as condições físico-químicas e climáticas de um terreno e deverá classificar e recomendar qual é a cultura agrícola (ex: café, milho, arroz, etc.) mais adequada para o plantio. 
+O objetivo deste projeto é desenvolver, treinar e validar uma Rede Neural Artificial (do tipo Multi-Layer Perceptron) capaz de classificar, para uma dada cultura e um dado conjunto de condições de cultivo, em qual FAIXA DE PRODUTIVIDADE a lavoura deve ficar: baixa, média ou alta, em relação ao desempenho histórico típico daquela cultura.
+
+Sobre esse alvo ser relativo: a produtividade no dataset está em unidades diferentes conforme a cultura (coco é medido em número de cocos por hectare, cana em toneladas). Dividindo cada valor pela mediana histórica da própria cultura, a unidade se cancela e a comparação passa a ser justa.
+
+Com o modelo treinado, o sistema apoia a decisão de plantio de forma fundamentada: para um terreno específico, basta rodar a rede sobre as culturas candidatas e verificar quais têm produtividade prevista como "alta" naquelas condições.
 
 METODOLOGIA BÁSICA:
-- Utilização de um dataset estruturado e balanceado ("Crop Recommendation Dataset").
-- Aplicação de técnicas de pré-processamento (normalização dos dados de clima e solo).
-- Treinamento da rede utilizando funções de ativação adequadas (como ReLU e Softmax) e otimizadores padrão da disciplina.
-- Avaliação do desempenho da rede por meio do cálculo de erro e geração de uma Matriz de Confusão.
+- Dataset de dados agrícolas oficiais da Índia: 19.689 registros reais, cobrindo 30 estados, 55 culturas e os anos de 1997 a 2020.
+- Pré-processamento: agrupamento de culturas com poucos registros, normalização de insumos por hectare, transformação logarítmica das variáveis assimétricas, codificação one-hot das variáveis categóricas e padronização.
+- Cuidado explícito contra vazamento de dados: a coluna de produção total é descartada (a produtividade é derivada dela), e as medianas que definem as faixas são calculadas apenas com o conjunto de treino.
+- Treinamento da rede utilizando funções de ativação adequadas (ReLU nas camadas ocultas e Softmax na saída) e otimizadores padrão da disciplina.
+- Avaliação do desempenho por acurácia simples, acurácia balanceada, F1 macro e Matriz de Confusão.

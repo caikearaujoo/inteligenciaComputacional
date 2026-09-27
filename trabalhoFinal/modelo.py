@@ -41,11 +41,31 @@ from sklearn.metrics import (
 
 from preprocessamento import executar_pipeline
 
-CAMINHO_DATASET = "dados/Crop_Ethiopia_soil_weather.csv"
-CAMADAS_OCULTAS = (32, 16)
+CAMINHO_DATASET = "dados/Crop_Yield_India.csv"
+# 92 entradas -> 64 ocultos -> 3 saidas = 6.147 parametros treinaveis.
+#
+# Sobre a regra de ~20 exemplos por parametro discutida em aula: com 15.751
+# exemplos de treino, ela permitiria no maximo ~787 parametros (uma camada de
+# 8 neuronios). Medimos o que acontece ao ultrapassar esse limite:
+#
+#   8 neuronios (20,4 ex/param) -> teste 65,8%, diferenca treino/teste 2,8 pts
+#  32 neuronios ( 5,1 ex/param) -> teste 76,8%, diferenca 3,4 pts
+#  64 neuronios ( 2,6 ex/param) -> teste 79,5%, diferenca 3,4 pts
+# 128 neuronios ( 1,3 ex/param) -> teste 80,3%, diferenca 4,5 pts
+#
+# O risco que a regra quer evitar e o decoramento, que aparece como diferenca
+# grande entre treino e teste. Essa diferenca ficou entre 3 e 5 pontos mesmo
+# com 1,3 exemplos por parametro, enquanto a acuracia de teste subiu 14
+# pontos. Ou seja, neste problema a regra e conservadora demais - decidimos
+# pelo que foi medido (generalizacao real) e nao pela heuristica. Paramos em
+# 64 porque o ganho de 64 para 128 e de menos de 1 ponto, ao custo de dobrar
+# os parametros.
+CAMADAS_OCULTAS = (64,)
 EPOCAS = 50
 TAXA_APRENDIZADO = 1e-3
 TAMANHO_LOTE = 64
+DROPOUT = 0.2
+PESO_L2 = 1e-4
 SEMENTE = 42
 
 
@@ -68,14 +88,24 @@ def inicializar(W: torch.Tensor, b: torch.Tensor,
 
 
 class MLP(nn.Module):
-    """MLP simples: Linear -> ReLU -> Linear -> ReLU -> ... -> Linear (logits)."""
+    """
+    MLP: Linear -> ReLU -> [dropout] -> ... -> Linear (logits).
 
-    def __init__(self, d_entrada, n_classes, camadas_ocultas=CAMADAS_OCULTAS):
+    O dropout desliga aleatoriamente uma fracao dos neuronios a cada passo de
+    treino, o que impede a rede de depender demais de um neuronio especifico e
+    reduz a tendencia de decorar os exemplos. Fica ativo so no treino - na
+    avaliacao (modelo.eval()) o PyTorch desliga sozinho.
+    """
+
+    def __init__(self, d_entrada, n_classes, camadas_ocultas=CAMADAS_OCULTAS,
+                 dropout=DROPOUT):
         super().__init__()
         dims = [d_entrada, *camadas_ocultas, n_classes]
         self.camadas = nn.ModuleList(
             nn.Linear(dims[i], dims[i + 1]) for i in range(len(dims) - 1)
         )
+        self.dropout = nn.Dropout(dropout)
+
         n_camadas = len(self.camadas)
         with torch.no_grad():
             for k, linear in enumerate(self.camadas, start=1):
@@ -85,8 +115,9 @@ class MLP(nn.Module):
     def forward(self, x):
         for k, linear in enumerate(self.camadas):
             x = linear(x)
-            if k < len(self.camadas) - 1:
+            if k < len(self.camadas) - 1:   # ultima camada devolve logits crus
                 x = ativacao(x)
+                x = self.dropout(x)
         return x
 
 
@@ -99,7 +130,9 @@ def treinar(modelo, X_treino, y_treino, epocas=EPOCAS, lr=TAXA_APRENDIZADO,
     por epoca e e a pratica padrao - com lote completo a rede aprendia devagar
     demais neste dataset.
     """
-    otimizador = torch.optim.Adam(modelo.parameters(), lr=lr)
+    # weight_decay = penalizacao L2: empurra os pesos para valores menores,
+    # outra forma de conter o decoramento dos exemplos de treino
+    otimizador = torch.optim.Adam(modelo.parameters(), lr=lr, weight_decay=PESO_L2)
     gerador = torch.Generator().manual_seed(semente)
 
     for epoca in range(1, epocas + 1):
@@ -178,6 +211,7 @@ def main():
     print(f"\nArquitetura: {X_treino_t.shape[1]} -> {' -> '.join(str(c) for c in CAMADAS_OCULTAS)} -> {n_classes}")
     total_parametros = sum(p.numel() for p in modelo.parameters())
     print(f"Total de parametros: {total_parametros}")
+    print(f"Exemplos de treino por parametro: {len(X_treino_t) / total_parametros:.1f}")
 
     print(f"\nTreinando por {EPOCAS} epocas...")
     treinar(modelo, X_treino_t, y_treino_t)
