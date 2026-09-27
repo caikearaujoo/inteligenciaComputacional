@@ -4,43 +4,113 @@ Projeto: Sistema de Recomendacao de Culturas Agricolas
 Disciplina: Inteligencia Computacional
 Autores: Caike e Izidro
 
-Este script cuida apenas da etapa de dados: carregar o CSV, separar
-treino/teste, aplicar a expansao de caracteristicas phi(X) e normalizar.
-A rede neural (MLP) entra em uma etapa seguinte.
+Dataset: "Crop Recommendation using Soil Properties and Weather Prediction"
+(Mendeley Data, DOI 10.17632/8v757rr4st.1) - dados REAIS de campo da Agencia
+de Transformacao Agricola da Etiopia (solo e cultura) combinados com dados
+climaticos da NASA. 3.867 registros, 12 culturas, 28 variaveis.
+
+Substituiu o dataset sintetico do Kaggle (2.200 linhas) usado ate a Semana 2 -
+ver TrabalhoFinal.md para a justificativa completa da troca.
+
+Este script cuida apenas da etapa de dados: carregar, limpar, separar
+treino/teste, balancear, expandir caracteristicas e normalizar.
 """
 
 import numpy as np
 import pandas as pd
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTENC
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
-COLUNAS_ENTRADA = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"]
+COLUNA_COR = "Soilcolor"
+COLUNAS_SOLO = ["Ph", "K", "P", "N", "Zn", "S"]
+COLUNAS_CLIMA = [
+    "QV2M-W", "QV2M-Sp", "QV2M-Su", "QV2M-Au",
+    "T2M_MAX-W", "T2M_MAX-Sp", "T2M_MAX-Su", "T2M_MAX-Au",
+    "T2M_MIN-W", "T2M_MIN-Sp", "T2M_MIN-Su", "T2M_MIN-Au",
+    "PRECTOTCORR-W", "PRECTOTCORR-Sp", "PRECTOTCORR-Su", "PRECTOTCORR-Au",
+    "WD10M", "GWETTOP", "CLOUD_AMT", "WS2M_RANGE", "PS",
+]
 COLUNA_ALVO = "label"
+
+# Categorias canonicas da cor do solo, fixadas para que treino e teste gerem
+# exatamente as mesmas colunas no one-hot.
+CORES_CANONICAS = ["black", "brown", "gray", "red", "outro"]
+
+# Colunas fortemente assimetricas (cauda longa a direita), medido no dataset:
+# P tem mediana 4 e maximo 782; Zn mediana 1,5 e maximo 45,5. O log comprime
+# essa cauda e evita que poucos valores extremos dominem a normalizacao.
+COLUNAS_ASSIMETRICAS = ["K", "P", "Zn", "S"]
 
 
 def carregar_dados(caminho_csv):
     """
-    Carrega o dataset CSV e separa em variaveis de entrada (X) e alvo (y).
+    Carrega o CSV e separa entrada (X) e alvo (y).
 
-    Espera as colunas: N, P, K, temperature, humidity, ph, rainfall, label
+    X mantem a cor do solo como texto nesta etapa; a limpeza e a codificacao
+    acontecem depois, em passos proprios.
     """
     dados = pd.read_csv(caminho_csv)
 
-    X = dados[COLUNAS_ENTRADA].copy()
+    colunas_entrada = [COLUNA_COR] + COLUNAS_SOLO + COLUNAS_CLIMA
+    X = dados[colunas_entrada].copy()
     y = dados[COLUNA_ALVO].copy()
 
     return X, y
 
 
+def limpar_cor_solo(coluna_cor):
+    """
+    Normaliza a cor do solo, que no dado bruto tem 45 variantes escritas a mao
+    para o que sao ~5 cores: "reddish brown", "Reddish brown", "Redish brown",
+    "Reddis brown", "Reddish broown", "Redishbrown" sao todas a mesma coisa.
+
+    Regra usada para escolher a cor: vale a ULTIMA cor citada no texto, porque
+    em ingles o substantivo vem depois do adjetivo - "reddish brown" e um
+    MARROM avermelhado (marrom), e "reddish gray" e um CINZA avermelhado
+    (cinza). Pegar a primeira cor daria a resposta errada nos dois casos.
+
+    Texto sem nenhuma cor reconhecivel (ex.: "other", "replacement of
+    inaccessible target") vai para a categoria "outro".
+    """
+    trocas = {
+        "redish": "reddish",
+        "reddis ": "reddish ",
+        "broown": "brown",
+        "lihgtish": "lightish",
+        "greyish": "grayish",
+        "grey": "gray",
+        "darkbrown": "dark brown",
+        "redishbrown": "reddish brown",
+    }
+    cores_buscadas = ["black", "brown", "gray", "red", "yellow"]
+
+    def classificar(valor):
+        texto = str(valor).lower().strip()
+        for errado, certo in trocas.items():
+            texto = texto.replace(errado, certo)
+
+        posicoes = [(texto.rfind(cor), cor) for cor in cores_buscadas if cor in texto]
+        if not posicoes:
+            return "outro"
+
+        cor = max(posicoes)[1]
+        # "yellow" so aparece em "yellowish brown", que ja vira brown pela
+        # regra da ultima cor; se aparecesse sozinho, cai em "outro" por nao
+        # ter volume suficiente para virar categoria propria.
+        return cor if cor in CORES_CANONICAS else "outro"
+
+    return coluna_cor.map(classificar)
+
+
 def dividir_treino_teste(X, y, proporcao_teste=0.2, semente=42):
     """
-    Divide os dados em treino e teste (80/20 por padrao).
+    Divide em treino e teste (80/20), estratificado pelas 12 culturas.
 
-    Usa stratify=y para manter a proporcao das 22 classes de cultura
-    parecida nos dois conjuntos, ja que o dataset tem varias classes
-    e algumas com poucas amostras.
+    A estratificacao e essencial aqui porque o dataset e DESBALANCEADO de
+    verdade: Teff tem 1.260 exemplos e Fallow tem 26. Sem estratificar, as
+    classes raras poderiam ficar inteiras de um lado so.
     """
     X_treino, X_teste, y_treino, y_teste = train_test_split(
         X,
@@ -52,148 +122,137 @@ def dividir_treino_teste(X, y, proporcao_teste=0.2, semente=42):
     return X_treino, X_teste, y_treino, y_teste
 
 
-def aplicar_smote(X_treino, y_treino, fator_multiplicacao=4, k_neighbors=5, semente=42):
+def aplicar_smote(X_treino, y_treino, fator_maximo=5, k_neighbors=5, semente=42):
     """
-    Aumenta o treino com exemplos sinteticos via SMOTE, so no treino
-    (nunca no teste, senao a validacao fica contaminada com dados
-    sinteticos "vazando" pra avaliacao).
+    Balanceia o treino com exemplos sinteticos, SO no treino.
 
-    Como o SMOTE cria exemplos interpolando entre um ponto e seus k
-    vizinhos mais proximos DA MESMA CLASSE, a distancia usada pra achar
-    esses vizinhos precisa ser justa entre as features - por isso
-    padronizamos antes de rodar o SMOTE (senao rainfall, que varia em
-    dezenas/centenas, dominaria a distancia sobre ph, que varia entre 3 e 10)
-    e desfazemos a padronizacao depois, devolvendo os dados na escala
-    original para o resto do pipeline (phi, normalizacao final) seguir
-    igual ao fluxo sem SMOTE.
+    Duas decisoes importantes aqui:
 
-    fator_multiplicacao=4 significa: cada classe passa a ter ~4x mais
-    exemplos no treino (100 amostras/classe no treino original ~= 80
-    depois do split -> ~320 depois do SMOTE).
+    1. Usamos SMOTENC, nao o SMOTE comum. O SMOTE comum interpola entre
+       pontos, o que funciona para numeros mas nao para categorias: a cor do
+       solo viraria "0,6 de marrom", que nao existe. O SMOTENC trata as
+       colunas categoricas separadamente, escolhendo a categoria mais comum
+       entre os vizinhos em vez de interpolar.
+
+    2. Limitamos o aumento a `fator_maximo` vezes o tamanho original de cada
+       classe, em vez de igualar tudo a classe majoritaria. Motivo: Fallow tem
+       ~21 exemplos no treino e Teff tem ~1.008. Igualar tudo exigiria gerar
+       987 exemplos sinteticos a partir de 21 reais (47x) - a rede aprenderia
+       basicamente ruido interpolado. Com o limite de 5x, o desbalanceamento
+       diminui sem inventar dado demais.
     """
-    scaler_smote = StandardScaler()
-    X_treino_escalado = scaler_smote.fit_transform(X_treino)
-
-    contagem_atual = y_treino.value_counts()
-    estrategia_amostragem = {
-        classe: int(round(contagem * fator_multiplicacao))
-        for classe, contagem in contagem_atual.items()
+    contagem = y_treino.value_counts()
+    maior = contagem.max()
+    estrategia = {
+        classe: int(min(maior, n * fator_maximo))
+        for classe, n in contagem.items()
     }
 
-    smote = SMOTE(
-        sampling_strategy=estrategia_amostragem,
+    # o SMOTENC precisa saber QUAIS colunas sao categoricas, por posicao
+    indice_categorico = [X_treino.columns.get_loc(COLUNA_COR)]
+
+    smote = SMOTENC(
+        categorical_features=indice_categorico,
+        sampling_strategy=estrategia,
         k_neighbors=k_neighbors,
         random_state=semente,
     )
-    X_aumentado_escalado, y_aumentado = smote.fit_resample(X_treino_escalado, y_treino)
+    X_aumentado, y_aumentado = smote.fit_resample(X_treino, y_treino)
 
-    X_aumentado_array = scaler_smote.inverse_transform(X_aumentado_escalado)
-    X_treino_aumentado = pd.DataFrame(X_aumentado_array, columns=X_treino.columns)
-    y_treino_aumentado = pd.Series(y_aumentado, name=y_treino.name)
+    return (
+        pd.DataFrame(X_aumentado, columns=X_treino.columns),
+        pd.Series(y_aumentado, name=y_treino.name),
+    )
 
-    return X_treino_aumentado, y_treino_aumentado
 
-
-def validar_smote(X_original, y_original, X_aumentado, y_aumentado):
+def validar_smote(y_antes, y_depois):
     """
-    Validacoes de sanidade sobre os dados sinteticos gerados pelo SMOTE:
-
-    1. Todas as classes devem ter o mesmo numero de exemplos antes e
-       depois (garante que o fator de multiplicacao foi aplicado
-       igualmente, sem favorecer nenhuma cultura).
-    2. Nenhum valor deve ficar fora dos limites fisicos minimos (N, P, K,
-       umidade, chuva, ph nao podem ser negativos) - como o SMOTE so
-       interpola entre pontos reais (combinacao convexa), isso deveria
-       valer sempre, mas testamos explicitamente.
-    3. Media e desvio padrao por classe antes/depois devem ficar
-       proximos (o SMOTE nao deveria distorcer o "centro" da nuvem de
-       pontos de cada cultura).
+    Confere que o balanceamento fez o que deveria: nenhuma classe encolheu, e
+    a razao entre a maior e a menor classe diminuiu.
     """
-    print("\n--- Validacao do SMOTE ---")
+    print("\n--- Validacao do balanceamento ---")
+    antes, depois = y_antes.value_counts(), y_depois.value_counts()
 
-    contagem_antes = y_original.value_counts()
-    contagem_depois = y_aumentado.value_counts()
-    print(f"Classes antes: {len(contagem_antes)} | depois: {len(contagem_depois)}")
-    print(f"Exemplos antes: {contagem_antes.sum()} | depois: {contagem_depois.sum()}")
+    razao_antes = antes.max() / antes.min()
+    razao_depois = depois.max() / depois.min()
+    print(f"Exemplos: {antes.sum()} -> {depois.sum()}")
+    print(f"Menor classe: {antes.min()} -> {depois.min()}")
+    print(f"Desbalanceamento (maior/menor): {razao_antes:.1f}x -> {razao_depois:.1f}x")
 
-    tamanhos_iguais_por_classe = contagem_depois.nunique() == 1
-    print(f"Todas as classes com o mesmo tamanho depois do SMOTE? {tamanhos_iguais_por_classe}")
-
-    colunas_nao_negativas = ["N", "P", "K", "humidity", "rainfall", "ph"]
-    minimos = X_aumentado[colunas_nao_negativas].min()
-    valores_negativos = (minimos < 0).any()
-    print(f"Algum valor negativo em colunas fisicamente nao-negativas? {valores_negativos}")
-    if valores_negativos:
-        raise ValueError(f"SMOTE gerou valores negativos invalidos:\n{minimos}")
-
-    medias_antes = X_original.assign(label=y_original).groupby("label").mean()
-    medias_depois = X_aumentado.assign(label=y_aumentado).groupby("label").mean()
-    diferenca_media_relativa = (
-        (medias_depois - medias_antes).abs() / medias_antes.abs()
-    ).mean().mean()
-    print(f"Diferenca media relativa (media por classe, antes vs depois): {diferenca_media_relativa:.4f}")
-
+    # alinha pelo nome da classe: as duas contagens vem ordenadas por
+    # frequencia, e essa ordem muda depois do balanceamento
+    encolheu = (depois.reindex(antes.index) < antes).any()
+    if encolheu:
+        raise ValueError("Alguma classe perdeu exemplos no balanceamento.")
+    print("Nenhuma classe perdeu exemplos.")
     print("--- Fim da validacao ---\n")
 
 
 def phi(X):
     """
-    Mapeamento phi(X): expande o conjunto de caracteristicas original
-    adicionando colunas derivadas com sentido agronomico, seguindo a
-    ideia do Teorema de Cover de projetar os dados em uma dimensao maior
-    para facilitar a separacao das classes.
+    Mapeamento phi(X): expande as caracteristicas com colunas derivadas,
+    seguindo a ideia do Teorema de Cover (projetar em dimensao maior para
+    facilitar a separacao das classes).
 
-    Importante: essa funcao NAO tem "fit" - e so uma transformacao
-    matematica direta em cima dos valores de entrada. Por isso pode ser
-    aplicada em treino e teste sem risco de vazamento de dados.
+    Nao tem "fit" - e transformacao matematica direta, entao pode ser aplicada
+    em treino e teste sem risco de vazamento.
 
-    Novas colunas criadas:
-    - temp_umidade : Temperatura * Umidade (interacao climatica)
-    - ph_quadrado  : pH ao quadrado (resposta nao linear da planta ao pH)
-    - N_por_P      : razao entre Nitrogenio e Fosforo
-    - chuva_log    : log(chuva + 1) (suaviza chuvas muito altas)
-    - K_quadrado   : Potassio ao quadrado
+    As transformacoes aqui sao justificadas pelos dados, nao escolhidas no
+    chute (ver estatisticas no TrabalhoFinal.md):
+
+    - log dos nutrientes assimetricos (K, P, Zn, S): P vai de 0 a 782 com
+      mediana 4, ou seja, alguns poucos pontos extremos dominariam a escala.
+    - N_por_P: balanco entre nitrogenio e fosforo (razao entre nutrientes).
+    - chuva_total: soma das 4 estacoes, o volume anual de chuva.
+    - amplitude_termica: media das maximas menos media das minimas, o quanto
+      a temperatura varia ao longo do ano.
     """
     X_expandido = X.copy()
 
-    # Termo cruzado: interacao entre temperatura e umidade
-    X_expandido["temp_umidade"] = X["temperature"] * X["humidity"]
+    for coluna in COLUNAS_ASSIMETRICAS:
+        X_expandido[f"log_{coluna}"] = np.log1p(X[coluna])
 
-    # Termo quadratico: resposta nao linear ao pH do solo
-    X_expandido["ph_quadrado"] = X["ph"] ** 2
-
-    # Razao entre nutrientes (+1 no denominador evita divisao por zero)
     X_expandido["N_por_P"] = X["N"] / (X["P"] + 1)
 
-    # Log da chuva (+1 antes do log evita log(0), que daria -Inf)
-    X_expandido["chuva_log"] = np.log(X["rainfall"] + 1)
+    colunas_chuva = [c for c in COLUNAS_CLIMA if c.startswith("PRECTOTCORR")]
+    X_expandido["chuva_total"] = X[colunas_chuva].sum(axis=1)
 
-    # Termo quadratico do potassio
-    X_expandido["K_quadrado"] = X["K"] ** 2
+    maximas = [c for c in COLUNAS_CLIMA if c.startswith("T2M_MAX")]
+    minimas = [c for c in COLUNAS_CLIMA if c.startswith("T2M_MIN")]
+    X_expandido["amplitude_termica"] = X[maximas].mean(axis=1) - X[minimas].mean(axis=1)
 
     return X_expandido
+
+
+def codificar_cor(X):
+    """
+    Transforma a cor do solo (categoria) em colunas 0/1 (one-hot).
+
+    Usa categorias FIXAS (CORES_CANONICAS) para garantir que treino e teste
+    produzam exatamente as mesmas colunas, na mesma ordem - se uma cor rara
+    nao aparecesse no teste, sem isso o teste teria uma coluna a menos e a
+    rede quebraria.
+    """
+    X = X.copy()
+    X[COLUNA_COR] = pd.Categorical(X[COLUNA_COR], categories=CORES_CANONICAS)
+    return pd.get_dummies(X, columns=[COLUNA_COR], prefix="cor", dtype=float)
 
 
 def normalizar_dados(X_treino, X_teste):
     """
     Padroniza os dados (media 0, variancia 1).
 
-    Regra rigida: o StandardScaler e ajustado (fit) SOMENTE no treino.
-    O teste e apenas transformado com os parametros aprendidos no treino,
-    para nao vazar informacao do teste para o pre-processamento.
+    O StandardScaler e ajustado (fit) SOMENTE no treino; o teste e apenas
+    transformado. Ajustar no teste vazaria informacao dele para a preparacao.
     """
     scaler = StandardScaler()
     scaler.fit(X_treino)
 
-    X_treino_array = scaler.transform(X_treino)
-    X_teste_array = scaler.transform(X_teste)
-
-    # Devolve como DataFrame para manter os nomes das colunas
     X_treino_normalizado = pd.DataFrame(
-        X_treino_array, columns=X_treino.columns, index=X_treino.index
+        scaler.transform(X_treino), columns=X_treino.columns, index=X_treino.index
     )
     X_teste_normalizado = pd.DataFrame(
-        X_teste_array, columns=X_teste.columns, index=X_teste.index
+        scaler.transform(X_teste), columns=X_teste.columns, index=X_teste.index
     )
 
     return X_treino_normalizado, X_teste_normalizado, scaler
@@ -201,14 +260,8 @@ def normalizar_dados(X_treino, X_teste):
 
 def codificar_rotulo(y_treino, y_teste):
     """
-    Converte o rotulo de texto ("rice", "maize", ...) para inteiros
-    (0 a 21), que e o formato que a MLP com Softmax/CrossEntropy espera.
-
-    O LabelEncoder e ajustado (fit) so no treino, seguindo a mesma regra
-    de nao vazar informacao do teste - mas como as 22 classes aparecem
-    garantidamente nos dois conjuntos (o split e estratificado), isso nao
-    tem risco pratico de o teste conter uma classe "desconhecida" pelo
-    encoder.
+    Converte o rotulo de texto ("Teff", "Maize", ...) para inteiro (0 a 11),
+    que e o formato esperado pela rede com Softmax/CrossEntropy.
     """
     encoder = LabelEncoder()
     y_treino_cod = encoder.fit_transform(y_treino)
@@ -218,16 +271,11 @@ def codificar_rotulo(y_treino, y_teste):
 
 def checar_nan_inf(X, nome_conjunto):
     """
-    Verificacao de seguranca: garante que nao existem valores
-    NaN ou infinitos depois das transformacoes.
-
-    Se encontrar algum valor invalido, interrompe a execucao com
-    ValueError em vez de so avisar, para nao deixar a rede neural
-    receber dados corrompidos (mesmo rigor do harness do Desafio 1,
-    que usa assert para o mesmo fim).
+    Interrompe a execucao se sobrou algum NaN ou infinito depois das
+    transformacoes, para a rede nunca receber dado corrompido.
     """
     tem_nan = X.isna().any().any()
-    tem_inf = np.isinf(X.to_numpy()).any()
+    tem_inf = np.isinf(X.to_numpy(dtype=float)).any()
 
     if tem_nan or tem_inf:
         raise ValueError(f"Valores invalidos (NaN/Inf) encontrados em {nome_conjunto}!")
@@ -235,41 +283,50 @@ def checar_nan_inf(X, nome_conjunto):
     print(f"{nome_conjunto}: nenhum valor NaN ou Inf encontrado.")
 
 
-def executar_pipeline(caminho_csv, usar_smote=True, fator_multiplicacao_smote=4):
+def executar_pipeline(caminho_csv, usar_smote=True, fator_maximo_smote=5):
     """
-    Executa o pipeline completo:
-    carregar -> dividir -> [SMOTE no treino] -> aplicar phi -> normalizar -> checar dados.
+    Pipeline completo:
+    carregar -> limpar cor -> dividir -> [balancear] -> phi -> one-hot ->
+    normalizar -> checar -> codificar rotulo.
     """
     print("1. Carregando dados...")
     X, y = carregar_dados(caminho_csv)
-    print(f"   Total de amostras: {X.shape[0]}, colunas originais: {X.shape[1]}")
+    print(f"   Amostras: {X.shape[0]} | colunas: {X.shape[1]} | culturas: {y.nunique()}")
 
-    print("2. Dividindo em treino (80%) e teste (20%)...")
+    print("2. Limpando a cor do solo...")
+    variantes_antes = X[COLUNA_COR].nunique()
+    X[COLUNA_COR] = limpar_cor_solo(X[COLUNA_COR])
+    print(f"   Variantes de texto: {variantes_antes} -> {X[COLUNA_COR].nunique()} categorias")
+
+    print("3. Dividindo em treino (80%) e teste (20%)...")
     X_treino, X_teste, y_treino, y_teste = dividir_treino_teste(X, y)
-    print(f"   Treino: {X_treino.shape[0]} amostras | Teste: {X_teste.shape[0]} amostras")
+    print(f"   Treino: {X_treino.shape[0]} | Teste: {X_teste.shape[0]}")
 
     if usar_smote:
-        print(f"2.1. Aplicando SMOTE no treino (fator {fator_multiplicacao_smote}x)...")
-        X_treino_original, y_treino_original = X_treino, y_treino
+        print(f"4. Balanceando o treino (SMOTENC, limite de {fator_maximo_smote}x)...")
+        y_treino_antes = y_treino
         X_treino, y_treino = aplicar_smote(
-            X_treino, y_treino, fator_multiplicacao=fator_multiplicacao_smote
+            X_treino, y_treino, fator_maximo=fator_maximo_smote
         )
-        print(f"   Treino depois do SMOTE: {X_treino.shape[0]} amostras")
-        validar_smote(X_treino_original, y_treino_original, X_treino, y_treino)
+        validar_smote(y_treino_antes, y_treino)
 
-    print("3. Aplicando phi(X) - expansao de caracteristicas...")
-    X_treino_phi = phi(X_treino)
-    X_teste_phi = phi(X_teste)
-    print(f"   Colunas depois de phi(X): {X_treino_phi.shape[1]}")
+    print("5. Aplicando phi(X) - expansao de caracteristicas...")
+    X_treino = phi(X_treino)
+    X_teste = phi(X_teste)
 
-    print("4. Normalizando (fit apenas no treino)...")
-    X_treino_final, X_teste_final, scaler = normalizar_dados(X_treino_phi, X_teste_phi)
+    print("6. Codificando a cor do solo (one-hot)...")
+    X_treino = codificar_cor(X_treino)
+    X_teste = codificar_cor(X_teste)
+    print(f"   Colunas finais: {X_treino.shape[1]}")
 
-    print("5. Checando valores invalidos...")
+    print("7. Normalizando (fit apenas no treino)...")
+    X_treino_final, X_teste_final, scaler = normalizar_dados(X_treino, X_teste)
+
+    print("8. Checando valores invalidos...")
     checar_nan_inf(X_treino_final, "treino")
     checar_nan_inf(X_teste_final, "teste")
 
-    print("6. Codificando rotulo (texto -> inteiro 0-21)...")
+    print("9. Codificando rotulo (texto -> inteiro)...")
     y_treino_cod, y_teste_cod, encoder_rotulo = codificar_rotulo(y_treino, y_teste)
     print(f"   Classes: {len(encoder_rotulo.classes_)}")
 
@@ -281,9 +338,11 @@ def executar_pipeline(caminho_csv, usar_smote=True, fator_multiplicacao_smote=4)
 
 
 if __name__ == "__main__":
-    CAMINHO_DATASET = "dados/Crop_recommendation.csv"
+    CAMINHO_DATASET = "dados/Crop_Ethiopia_soil_weather.csv"
 
-    X_treino, X_teste, y_treino, y_teste, scaler, encoder_rotulo = executar_pipeline(CAMINHO_DATASET)
+    X_treino, X_teste, y_treino, y_teste, scaler, encoder_rotulo = executar_pipeline(
+        CAMINHO_DATASET
+    )
 
     print("\nPrimeiras linhas do treino ja processado:")
     print(X_treino.head())

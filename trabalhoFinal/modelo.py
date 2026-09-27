@@ -4,7 +4,13 @@ Disciplina: Inteligencia Computacional
 Autores: Caike e Izidro
 
 Constroi, treina e avalia a rede neural sobre os dados preparados em
-preprocessamento.py (SMOTE + phi(X) + normalizacao + codificacao do rotulo).
+preprocessamento.py (limpeza + SMOTENC + phi(X) + normalizacao + codificacao).
+
+Dataset: dados REAIS da Etiopia (Mendeley 10.17632/8v757rr4st.1) - 3.867
+registros, 12 culturas, com desbalanceamento real (Teff 1.260 x Fallow 26).
+Por isso a avaliacao reporta tambem acuracia BALANCEADA e F1 macro, nao so
+acuracia simples: com classes desbalanceadas, acertar so a classe majoritaria
+ja daria uma acuracia simples enganosamente alta.
 
 Ativacao e inicializacao reaproveitam a mesma tecnica do Desafio 2
 (GBC073): ReLU, com o tamanho dos pesos calibrado por amostragem Monte
@@ -25,14 +31,21 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+)
 
 from preprocessamento import executar_pipeline
 
-CAMINHO_DATASET = "dados/Crop_recommendation.csv"
+CAMINHO_DATASET = "dados/Crop_Ethiopia_soil_weather.csv"
 CAMADAS_OCULTAS = (32, 16)
-EPOCAS = 1000
+EPOCAS = 50
 TAXA_APRENDIZADO = 1e-3
+TAMANHO_LOTE = 64
 SEMENTE = 42
 
 
@@ -77,17 +90,31 @@ class MLP(nn.Module):
         return x
 
 
-def treinar(modelo, X_treino, y_treino, epocas=EPOCAS, lr=TAXA_APRENDIZADO):
+def treinar(modelo, X_treino, y_treino, epocas=EPOCAS, lr=TAXA_APRENDIZADO,
+            tamanho_lote=TAMANHO_LOTE, semente=SEMENTE):
+    """
+    Treina em mini-lotes: em vez de olhar os 6.655 exemplos de uma vez e dar
+    um unico passo por epoca, o treino embaralha os dados e da um passo a cada
+    `tamanho_lote` exemplos. Isso multiplica o numero de atualizacoes de peso
+    por epoca e e a pratica padrao - com lote completo a rede aprendia devagar
+    demais neste dataset.
+    """
     otimizador = torch.optim.Adam(modelo.parameters(), lr=lr)
-    modelo.train()
+    gerador = torch.Generator().manual_seed(semente)
+
     for epoca in range(1, epocas + 1):
-        otimizador.zero_grad()
-        logits = modelo(X_treino)
-        perda = F.cross_entropy(logits, y_treino)
-        perda.backward()
-        otimizador.step()
-        if epoca % 100 == 0 or epoca == 1:
-            print(f"  epoca {epoca:4d}/{epocas} - perda: {perda.item():.4f}")
+        modelo.train()
+        perda_epoca = 0.0
+        indices = torch.randperm(len(X_treino), generator=gerador)
+        for lote in indices.split(tamanho_lote):
+            otimizador.zero_grad()
+            perda = F.cross_entropy(modelo(X_treino[lote]), y_treino[lote])
+            perda.backward()
+            otimizador.step()
+            perda_epoca += perda.item() * len(lote)
+
+        if epoca % 10 == 0 or epoca == 1:
+            print(f"  epoca {epoca:3d}/{epocas} - perda media: {perda_epoca/len(X_treino):.4f}")
     return modelo
 
 
@@ -99,7 +126,13 @@ def avaliar(modelo, X, y, nomes_classes, nome_conjunto):
     y_real = y.numpy()
 
     acc = accuracy_score(y_real, predito)
-    print(f"\nAcuracia ({nome_conjunto}): {acc:.4f}")
+    acc_balanceada = balanced_accuracy_score(y_real, predito)
+    f1_macro = f1_score(y_real, predito, average="macro", zero_division=0)
+
+    print(f"\n--- {nome_conjunto} ---")
+    print(f"Acuracia simples   : {acc:.4f}")
+    print(f"Acuracia balanceada: {acc_balanceada:.4f}  (media do acerto POR CLASSE)")
+    print(f"F1 macro           : {f1_macro:.4f}  (equilibra precisao e recall entre classes)")
     print(f"\nRelatorio de classificacao ({nome_conjunto}):")
     print(classification_report(y_real, predito, target_names=nomes_classes, zero_division=0))
 
