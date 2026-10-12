@@ -40,8 +40,10 @@ validação.
 
 **Experimentos** (`trabalhoFinal/experimentos.py`): a ativação, a inicialização
 e o `phi` foram escolhidos por medição, sempre na validação e com 3 sementes
-por configuração. Esses experimentos foram feitos com Adam 1e-3, antes do Desafio 3. Entre as ativações testadas, tanh ficou à frente de GELU e
-ReLU (diferenças de 3 desvios ou mais) e a SELU foi a pior. Para o `phi`, na
+por configuração. Para isolar o efeito de cada escolha, o treino foi mantido fixo
+nesses experimentos (Adam, lr 1e-3, constante, o mesmo da baseline do Desafio 3).
+Entre as ativações testadas, tanh ficou à frente de GELU e ReLU (diferenças de
+3 desvios ou mais) e a SELU foi a pior. Para o `phi`, na
 MLP nenhuma variante se distinguiu do "sem phi"; num modelo linear ele ajudou
 um pouco, quase tudo pelo aspecto em seno/cosseno.
 
@@ -108,7 +110,7 @@ resto) com agenda warmup + cosseno**: F1 macro de validação 0,9121 ± 0,0009
 contra 0,8646 ± 0,0028 da baseline (Adam 1e-3, constante), e no teste 0,9104
 contra 0,8689. O ganho de +0,0475 se decompõe em lr maior com agenda que decai
 (+0,031), weight decay (+0,004) e Muon (+0,013). Com 200 épocas o ganho cai para
-+0,019 (1 semente). Nos sinais, o passo do Muon é proporcional ao lr e à forma da
++0,017 (3 sementes, ainda cerca de 9 vezes o desvio entre sementes). Nos sinais, o passo do Muon é proporcional ao lr e à forma da
 matriz (variação de 1 a 2%, contra 29 a 41% do SGD), e a execução instável (SGD
 com lr 3,0) mostra "passo grande demais". O modelo final do projeto
 (`trabalhoFinal/modelo.py`) usa essa receita. Cada linha de `desafio3/experimentos.csv`
