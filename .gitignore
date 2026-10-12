@@ -14,6 +14,10 @@ desafio3/logs_etapa*.txt
 # Intermediário do slide: o slide_html.py o recria a cada execução; o entregável é o slide.pdf
 desafio3/slide.html
 
+# Scripts que reexecutam as etapas do protocolo: não são entregáveis (cada linha do
+# experimentos.csv se reproduz pela coluna `comando`)
+desafio3/etapa*
+
 # Dataset (baixado localmente, não versionar)
 trabalhoFinal/dados/
 desafios/desafio2/dados/
