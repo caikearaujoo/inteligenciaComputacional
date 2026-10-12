@@ -253,20 +253,29 @@ def pagina_ganho(pdf, d):
     a1.set_title("De onde vem o ganho de +0,0475 (40 epocas)", loc="left")
     a1.grid(axis="x", visible=False)
 
-    y = d[d.epocas == 200]
-    ref = [("40 epocas\n(3 sementes)", passos[0][1][0], passos[3][1][0]),
-           ("200 epocas\n(1 semente)", y[y.otimizador == "adam"].f1_melhor.iloc[0],
-            y[y.otimizador == "muon"].f1_melhor.iloc[0])]
-    for k, (rotulo, base, muon) in enumerate(ref):
+    y = d[(d.epocas == 200) & (d.nome.str.startswith("final_") == False)]
+
+    def media_200(filtro):
+        v = y[filtro].f1_melhor
+        return v.mean(), v.std(ddof=0), len(v)
+
+    b200 = media_200((y.otimizador == "adam") & (y.lr == 0.001) & (y.agenda == "constante"))
+    m200 = media_200((y.otimizador == "muon") & (y.lr == 0.03) & (y.agenda == "warmup_cosseno"))
+    ref = [("40 epocas\n(3 sementes)", passos[0][1], passos[3][1]),
+           (f"200 epocas\n({b200[2]} sementes)", b200[:2], m200[:2])]
+    for k, (rotulo, (base, sd_base), (muon, sd_muon)) in enumerate(ref):
         a2.plot([k, k], [base, muon], color=TEXTO_2, lw=1.0, zorder=1)
+        a2.errorbar(k, base, yerr=sd_base, color=TEXTO, capsize=4, lw=1.2, zorder=2)
+        a2.errorbar(k, muon, yerr=sd_muon, color=TEXTO, capsize=4, lw=1.2, zorder=2)
         a2.plot(k, base, marker="^", ms=13, color=COR["adam"], mec=SUPERFICIE, mew=1.5, ls="none",
                 label="Baseline (Adam 1e-3, constante)" if k == 0 else None, zorder=3)
         a2.plot(k, muon, marker="o", ms=13, color=COR["muon"], mec=SUPERFICIE, mew=1.5, ls="none",
                 label="Muon (lr 0,03, warmup + cosseno)" if k == 0 else None, zorder=3)
-        a2.text(k + 0.07, base, virgula(base), va="center", fontsize=9.5, color=TEXTO)
-        a2.text(k + 0.07, muon, virgula(muon), va="center", fontsize=9.5, color=TEXTO)
-        a2.text(k - 0.07, (base + muon) / 2, "+" + virgula(muon - base), va="center", ha="right",
-                fontsize=9.5, color=TEXTO)
+        a2.text(k + 0.07, base, virgula(base) + " ± " + virgula(sd_base), va="center", fontsize=9, color=TEXTO)
+        a2.text(k + 0.07, muon, virgula(muon) + " ± " + virgula(sd_muon), va="center", fontsize=9, color=TEXTO)
+        razao = (muon - base) / max(sd_base, sd_muon, 1e-9)
+        a2.text(k - 0.07, (base + muon) / 2, "+" + virgula(muon - base) + "\n(" + str(int(razao)) + "x o desvio)",
+                va="center", ha="right", fontsize=9.5, color=TEXTO)
     a2.set_xticks(range(2))
     a2.set_xticklabels([r[0] for r in ref])
     a2.set_xlim(-0.5, 1.5)
