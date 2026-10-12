@@ -1,24 +1,21 @@
 TEMA:
-Inteligência Computacional Aplicada à Agricultura (Previsão de Produtividade e Apoio à Decisão de Plantio)
+Inteligência Computacional Aplicada à Aptidão de Terreno: classificação da cobertura vegetal a partir de variáveis de solo e relevo
 
 INTRODUÇÃO:
-O avanço da agricultura de precisão tem exigido ferramentas tecnológicas cada vez mais robustas para apoiar a tomada de decisão no campo. O sucesso de uma colheita depende diretamente de fatores do solo, do clima da região e do manejo de insumos. Neste cenário, a Inteligência Computacional oferece métodos capazes de aprender padrões complexos a partir de dados históricos, permitindo prever cenários e otimizar o uso da terra agrícola.
+Saber o que cresce naturalmente em um terreno é uma informação central para o manejo florestal e para a agricultura de precisão: ela orienta onde plantar, onde preservar e como planejar o uso da terra. A cobertura vegetal de um local depende de fatores físicos mensuráveis, como a elevação, a orientação e a inclinação da encosta, a proximidade da água e o tipo de solo. Neste cenário, a Inteligência Computacional oferece métodos capazes de aprender padrões complexos a partir de dados históricos de grande volume.
 
 IDEIA A RESOLVER (PROBLEMA):
-Muitas vezes, a decisão sobre o que plantar e quanto investir em insumos é feita com base na intuição empírica, o que pode levar a um uso ineficiente do solo, desperdício de fertilizantes e, consequentemente, baixa produtividade. A dificuldade está em cruzar múltiplas variáveis simultaneamente (região, safra, volume de chuva, dose de fertilizante e pesticida por hectare, área cultivada) para antecipar se uma determinada cultura tende a render bem ou mal naquelas condições.
+Mapear a vegetação de grandes áreas por levantamento de campo é caro e lento. A dificuldade está em cruzar muitas variáveis simultaneamente (relevo, distâncias, sombreamento e dezenas de tipos de solo) para identificar, com precisão, qual espécie domina cada trecho de terreno. O problema é agravado pelo desbalanceamento: algumas coberturas ocupam centenas de milhares de células e outras apenas alguns milhares.
 
-Uma observação metodológica importante, que orientou a definição do problema: tentamos inicialmente prever "qual cultura o agricultor plantou" a partir das condições do terreno. Medindo os dados, constatamos que essa relação é fraca em dados reais — a escolha da cultura é uma decisão humana (tradição, mercado, semente disponível), não uma consequência física do solo. Já a produtividade É determinada pelas condições, e por isso é um alvo que a rede consegue de fato aprender.
+Uma observação metodológica que orientou a escolha do problema: nas tentativas anteriores do projeto, prever "qual cultura o agricultor plantou" mostrou-se um alvo fraco em dados reais, porque é uma decisão humana (tradição, mercado, semente disponível). A cobertura vegetal natural, ao contrário, tem relação física forte com o terreno, e por isso é um alvo que a rede consegue de fato aprender.
 
 OBJETIVO:
-O objetivo deste projeto é desenvolver, treinar e validar uma Rede Neural Artificial (do tipo Multi-Layer Perceptron) capaz de classificar, para uma dada cultura e um dado conjunto de condições de cultivo, em qual FAIXA DE PRODUTIVIDADE a lavoura deve ficar: baixa, média ou alta, em relação ao desempenho histórico típico daquela cultura.
-
-Sobre esse alvo ser relativo: a produtividade no dataset está em unidades diferentes conforme a cultura (coco é medido em número de cocos por hectare, cana em toneladas). Dividindo cada valor pela mediana histórica da própria cultura, a unidade se cancela e a comparação passa a ser justa.
-
-Com o modelo treinado, o sistema apoia a decisão de plantio de forma fundamentada: para um terreno específico, basta rodar a rede sobre as culturas candidatas e verificar quais têm produtividade prevista como "alta" naquelas condições.
+O objetivo deste projeto é desenvolver, treinar e validar uma Rede Neural Artificial (do tipo Multi-Layer Perceptron) capaz de atuar como classificador multiclasse. O modelo receberá como entrada as condições de solo e relevo de uma célula de terreno de 30 x 30 m e deverá classificar qual das 7 coberturas vegetais domina ali (Spruce/Fir, Lodgepole Pine, Ponderosa Pine, Cottonwood/Willow, Aspen, Douglas-fir e Krummholz).
 
 METODOLOGIA BÁSICA:
-- Dataset de dados agrícolas oficiais da Índia: 19.689 registros reais, cobrindo 30 estados, 55 culturas e os anos de 1997 a 2020.
-- Pré-processamento: agrupamento de culturas com poucos registros, normalização de insumos por hectare, transformação logarítmica das variáveis assimétricas, codificação one-hot das variáveis categóricas e padronização.
-- Cuidado explícito contra vazamento de dados: a coluna de produção total é descartada (a produtividade é derivada dela), e as medianas que definem as faixas são calculadas apenas com o conjunto de treino.
-- Treinamento da rede utilizando funções de ativação adequadas (ReLU nas camadas ocultas e Softmax na saída) e otimizadores padrão da disciplina.
-- Avaliação do desempenho por acurácia simples, acurácia balanceada, F1 macro e Matriz de Confusão.
+- Dataset Forest Covertype (UCI), carregado diretamente pelo scikit-learn: 581.012 células da Floresta Nacional Roosevelt (Colorado, EUA), com 54 variáveis (10 numéricas de relevo e distâncias, 4 de área selvagem e 40 de tipo de solo) e 7 classes.
+- Divisão estratificada em treino (70%), validação (15%) e teste (15%). A validação decide todas as escolhas (ativação, inicialização, otimizador, agenda de taxa de aprendizado); o teste só é olhado no final, para ser uma medida honesta.
+- Pré-processamento: padronização apenas das variáveis contínuas, com ajuste somente no treino; as 44 variáveis binárias são mantidas.
+- Mapeamento de características phi(X) com sentido físico: o aspecto (um ângulo) vira seno e cosseno, para que 1° e 359° sejam vizinhos; distância euclidiana até a água, a partir das distâncias horizontal e vertical; e o termo cruzado elevação x declividade.
+- Treinamento da rede (tanh nas camadas ocultas, escolhida no Desafio 2) com CrossEntropyLoss (que já aplica o Softmax internamente) sobre os logits da última camada e inicialização calibrada por Monte Carlo (Desafio 2). Otimizador e agenda de taxa de aprendizado escolhidos no Desafio 3: Muon nas matrizes ocultas e AdamW nos vieses e na camada de saída, com agenda warmup + cosseno.
+- Avaliação por acurácia simples, acurácia balanceada, F1 macro, recall por classe e Matriz de Confusão 7x7. Como chutar sempre a classe majoritária já acerta 48,8%, a acurácia sozinha engana.

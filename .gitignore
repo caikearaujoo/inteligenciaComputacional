@@ -1,7 +1,15 @@
 # Notas/histórico de desenvolvimento com IA (não subir pro repositório do professor)
+# Regra geral: nenhum .md sobe, exceto o README.md (que é o texto de apresentação)
+*.md
+!README.md
 trabalhoFinal/CLAUDE.md
 trabalhoFinal/TrabalhoFinal.md
 desafios/desafio2/desafio2.md
+desafio3/desafio3.md
+
+# Logs soltos e saídas de etapas (não são entregáveis; a desafio3/logs/ SIM é, o enunciado pede)
+*.log
+desafio3/logs_etapa*.txt
 
 # Dataset (baixado localmente, não versionar)
 trabalhoFinal/dados/

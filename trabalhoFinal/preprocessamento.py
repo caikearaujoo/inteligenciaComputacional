@@ -1,274 +1,232 @@
 """
 Pipeline de Ingestao e Pre-processamento
-Projeto: Previsao de Produtividade Agricola (Inteligencia Computacional)
+Projeto: Classificacao de Cobertura Vegetal a partir de Solo e Relevo
+Disciplina: Inteligencia Computacional
 Autores: Caike e Izidro
 
-Dataset: dados agricolas oficiais da India (19.689 registros, 1997-2020),
-por estado, ano, safra e cultura. Producao e area vem do orgao de estatistica
-agricola; chuva, fertilizante e pesticida acompanham cada registro.
+Dataset: Forest Covertype (UCI). Cada linha e uma celula de 30 x 30 m da
+Floresta Nacional Roosevelt, no norte do Colorado (EUA): 581.012 celulas,
+54 variaveis e 7 classes de cobertura vegetal.
 
-TAREFA: dadas as condicoes de uma lavoura (estado, safra, chuva, insumos,
-area) e a cultura considerada, prever em que FAIXA de produtividade ela deve
-ficar - baixa, media ou alta - em relacao ao tipico daquela cultura.
+As 54 variaveis sao:
+  - 10 numericas de relevo e distancias (elevacao, aspecto, declividade,
+    distancias a agua, estrada e focos de incendio, 3 indices de sombra);
+  - 4 binarias de area selvagem (one-hot);
+  - 40 binarias de tipo de solo (one-hot).
 
-Por que faixa relativa, e nao o valor absoluto: a coluna Yield esta em
-unidades DIFERENTES conforme a cultura (coco e medido em numero de cocos por
-hectare, cana em toneladas). Comparar 6.317 de coco com 3,4 de arroz nao
-significa nada. Dividindo cada valor pela mediana historica da propria
-cultura, a unidade se cancela e a comparacao passa a ser justa: "essa lavoura
-rende mais ou menos que o tipico dessa cultura?".
+TAREFA: dadas as condicoes de uma celula de terreno (solo e relevo), prever
+qual e a cobertura vegetal dominante ali (aptidao do terreno).
+
+Carregamento: `fetch_covtype` do scikit-learn, sem precisar baixar CSV a mao.
+
+DESBALANCEAMENTO: Lodgepole Pine tem 283.301 celulas e Cottonwood/Willow so
+2.747. Chutar sempre a classe majoritaria ja acerta 48,8%, entao a acuracia
+simples engana - o projeto reporta tambem acuracia balanceada, F1 macro e
+recall por classe.
 """
 
 import numpy as np
 import pandas as pd
+from sklearn.datasets import fetch_covtype
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 
-COLUNA_CULTURA = "Crop"
-COLUNA_ALVO_BRUTO = "Yield"
-COLUNAS_CATEGORICAS = ["Crop", "Season", "State"]
-COLUNAS_NUMERICAS = ["Crop_Year", "Area", "Annual_Rainfall", "Fertilizer", "Pesticide"]
+NOMES_CLASSES = [
+    "Spruce/Fir",
+    "Lodgepole Pine",
+    "Ponderosa Pine",
+    "Cottonwood/Willow",
+    "Aspen",
+    "Douglas-fir",
+    "Krummholz",
+]
 
-# Production NAO entra como entrada: Yield = Production / Area, entao usa-la
-# seria entregar a resposta ao modelo (conferido no dado: correlacao 0,9965
-# entre Yield e Production/Area).
-COLUNA_VAZAMENTO = "Production"
+COLUNAS_NUMERICAS = [
+    "Elevation",
+    "Aspect",
+    "Slope",
+    "Horizontal_Distance_To_Hydrology",
+    "Vertical_Distance_To_Hydrology",
+    "Horizontal_Distance_To_Roadways",
+    "Hillshade_9am",
+    "Hillshade_Noon",
+    "Hillshade_3pm",
+    "Horizontal_Distance_To_Fire_Points",
+]
+COLUNAS_AREA = [f"Wilderness_Area_{i}" for i in range(4)]
+COLUNAS_SOLO = [f"Soil_Type_{i}" for i in range(40)]
+COLUNAS_BINARIAS = COLUNAS_AREA + COLUNAS_SOLO
 
-# Fronteiras das faixas, em fracao da mediana historica da cultura.
-# Abaixo de 0,75 = baixa; entre 0,75 e 1,25 = media; acima = alta.
-LIMITE_BAIXA = 0.75
-LIMITE_ALTA = 1.25
-NOMES_FAIXAS = ["baixa", "media", "alta"]
 
-# Culturas com menos exemplos que isso sao agrupadas em "Outras": com poucos
-# registros nao da para estimar uma mediana historica confiavel.
-MINIMO_POR_CULTURA = 100
-ROTULO_OUTRAS = "Outras"
-
-
-def carregar_dados(caminho_csv):
+def carregar_dados():
     """
-    Carrega o CSV e devolve as colunas de entrada mais a produtividade bruta.
+    Carrega o Covertype e devolve X (DataFrame, float32) e y (inteiros 0 a 6).
 
-    A produtividade ainda nao e o rotulo final: ela vira faixa (baixa/media/
-    alta) depois do split, em `criar_faixas_produtividade`.
+    O dataset original numera as classes de 1 a 7; subtraimos 1 porque o
+    PyTorch espera rotulos comecando em 0.
     """
-    dados = pd.read_csv(caminho_csv)
-    dados = dados.drop(columns=[COLUNA_VAZAMENTO])
-
-    # espacos sobrando no nome da safra ("Kharif     ") atrapalhariam o one-hot
-    dados["Season"] = dados["Season"].str.strip()
-
-    return dados
+    dados = fetch_covtype(as_frame=True)
+    X = dados.data.astype("float32")
+    y = (dados.target.astype("int64") - 1).reset_index(drop=True)
+    X = X.reset_index(drop=True)
+    return X, y
 
 
-def agrupar_culturas_raras(dados, minimo=MINIMO_POR_CULTURA):
+def dividir_treino_validacao_teste(X, y, prop_validacao=0.15, prop_teste=0.15, semente=42):
     """
-    Junta as culturas com poucos registros numa categoria "Outras".
+    Divide em treino (70%), validacao (15%) e teste (15%), estratificado.
 
-    O rotulo deste projeto e definido POR CULTURA (produtividade relativa a
-    mediana historica dela). Com 10 ou 30 registros, essa mediana e instavel:
-    um unico ano atipico desloca a referencia e reclassifica todas as linhas
-    daquela cultura. Agrupar evita construir o alvo em cima de estatistica
-    fragil.
+    Por que TRES partes e nao duas: ao longo do projeto vamos comparar
+    ativacoes, inicializacoes, otimizadores e agendas de taxa de aprendizado. Toda decisao
+    desse tipo e tomada olhando a VALIDACAO. O teste fica intocado ate o
+    final, para ser uma medida honesta - se escolhessemos hiperparametros
+    olhando o teste, ele deixaria de ser dado "nunca visto" e o resultado
+    final ficaria otimista.
+
+    A estratificacao mantem a proporcao das 7 classes nas tres partes, o que
+    importa muito aqui: Cottonwood/Willow tem so 2.747 celulas no total.
     """
-    contagem = dados[COLUNA_CULTURA].value_counts()
-    raras = contagem[contagem < minimo].index
-
-    if len(raras) > 0:
-        dados = dados.copy()
-        dados[COLUNA_CULTURA] = dados[COLUNA_CULTURA].where(
-            ~dados[COLUNA_CULTURA].isin(raras), ROTULO_OUTRAS
-        )
-
-    return dados, list(raras)
-
-
-def dividir_treino_teste(dados, proporcao_teste=0.2, semente=42):
-    """
-    Divide em treino e teste (80/20), estratificado pela CULTURA.
-
-    Estratificar pela cultura (e nao pela faixa) garante que toda cultura
-    apareca no treino - necessario porque a mediana de referencia de cada uma
-    e calculada so com dados de treino. Sem isso, uma cultura que caisse
-    inteira no teste ficaria sem referencia.
-    """
-    return train_test_split(
-        dados,
-        test_size=proporcao_teste,
-        random_state=semente,
-        stratify=dados[COLUNA_CULTURA],
+    X_resto, X_teste, y_resto, y_teste = train_test_split(
+        X, y, test_size=prop_teste, random_state=semente, stratify=y
     )
+    prop_val_do_resto = prop_validacao / (1.0 - prop_teste)
+    X_treino, X_validacao, y_treino, y_validacao = train_test_split(
+        X_resto, y_resto, test_size=prop_val_do_resto, random_state=semente, stratify=y_resto
+    )
+    return X_treino, X_validacao, X_teste, y_treino, y_validacao, y_teste
 
 
-def criar_faixas_produtividade(dados_treino, dados_teste):
+# Termos do phi que podem ser ligados/desligados nos experimentos (ablacao):
+#   "aspecto"   -> aspecto vira seno e cosseno
+#   "agua"      -> distancia euclidiana ate a agua
+#   "elev_decl" -> elevacao x declividade
+TERMOS_PHI = ("aspecto", "agua", "elev_decl")
+
+
+def phi(X, termos=TERMOS_PHI):
     """
-    Transforma a produtividade bruta em faixa (baixa/media/alta), relativa a
-    mediana historica de cada cultura.
+    Mapeamento phi(X): transforma o terreno bruto nas caracteristicas que a
+    rede recebe, com sentido fisico (Teorema de Cover: projetar em outra
+    representacao para facilitar a separacao das classes).
 
-    Ponto critico de metodologia: as medianas sao calculadas SO COM O TREINO.
-    Calcula-las no dataset inteiro usaria informacao do teste para definir o
-    proprio rotulo - uma forma sutil de vazamento, que inflaria o resultado
-    sem que isso aparecesse em nenhuma metrica.
+    Nao tem "fit" - e transformacao matematica direta, entao pode ser aplicada
+    em treino, validacao e teste sem risco de vazamento.
+
+    1. ASPECTO vira seno e cosseno. Aspecto e um angulo (direcao para onde a
+       encosta aponta, de 0 a 359 graus). Para um numero comum, 1 grau e 359
+       graus parecem muito distantes, mas na realidade sao vizinhos: as duas
+       encostas apontam quase para o mesmo lado (norte). Seno e cosseno
+       colocam o angulo num circulo, onde a vizinhanca fica correta.
+
+    2. DISTANCIA EUCLIDIANA ATE A AGUA. O dado traz a distancia horizontal e a
+       vertical ate a agua mais proxima, separadas. O que importa para a
+       vegetacao e a distancia real, que e a hipotenusa dos dois.
+
+    3. ELEVACAO x DECLIVIDADE. Interacao entre duas variaveis fortes: o mesmo
+       declive tem efeito diferente em altitudes diferentes (neve, vento,
+       drenagem), e um termo cruzado deixa a rede enxergar isso direto.
     """
-    medianas = dados_treino.groupby(COLUNA_CULTURA)[COLUNA_ALVO_BRUTO].median()
+    saida = pd.DataFrame(index=X.index)
 
-    def faixas(dados):
-        referencia = dados[COLUNA_CULTURA].map(medianas)
-        relativo = dados[COLUNA_ALVO_BRUTO] / referencia
-        return pd.cut(
-            relativo,
-            bins=[-np.inf, LIMITE_BAIXA, LIMITE_ALTA, np.inf],
-            labels=NOMES_FAIXAS,
+    for coluna in COLUNAS_NUMERICAS:
+        # com o termo "aspecto" ligado, o Aspect bruto e trocado por seno/cosseno
+        if coluna != "Aspect" or "aspecto" not in termos:
+            saida[coluna] = X[coluna]
+
+    if "aspecto" in termos:
+        angulo = np.deg2rad(X["Aspect"])
+        saida["Aspect_sen"] = np.sin(angulo)
+        saida["Aspect_cos"] = np.cos(angulo)
+
+    if "agua" in termos:
+        saida["Dist_Agua"] = np.sqrt(
+            X["Horizontal_Distance_To_Hydrology"] ** 2
+            + X["Vertical_Distance_To_Hydrology"] ** 2
         )
 
-    return faixas(dados_treino), faixas(dados_teste), medianas
+    if "elev_decl" in termos:
+        saida["Elevacao_x_Declividade"] = X["Elevation"] * X["Slope"]
+
+    for coluna in COLUNAS_BINARIAS:
+        saida[coluna] = X[coluna]
+
+    return saida.astype("float32")
 
 
-def phi(dados):
+def colunas_continuas(X):
+    """Colunas que precisam ser padronizadas: todas menos as 44 binarias."""
+    return [c for c in X.columns if c not in COLUNAS_BINARIAS]
+
+
+def normalizar_dados(X_treino, X_validacao, X_teste):
     """
-    Mapeamento phi(X): monta as caracteristicas que a rede recebe.
-
-    Duas transformacoes com motivo agronomico, nao escolhidas no chute:
-
-    1. INSUMO POR HECTARE. Fertilizante e pesticida vem como totais da
-       lavoura, entao crescem junto com a area - uma fazenda grande usa mais
-       adubo sem necessariamente adubar melhor. O que afeta a produtividade e
-       a dose por hectare, entao dividimos pela area.
-
-    2. LOG das variaveis muito assimetricas. Area vai de alguns hectares a 50
-       milhoes (mediana 9.317), e fertilizante chega a 4,8 bilhoes com mediana
-       1,2 milhao. Sem o log, um punhado de lavouras gigantes dominaria a
-       normalizacao e comprimiria todo o resto perto de zero.
+    Padroniza so as colunas CONTINUAS (media 0, variancia 1), com fit apenas
+    no treino. As 44 binarias ficam como estao: ja valem 0 ou 1, e padroniza-las
+    so tiraria o significado de "este solo esta presente ou nao".
     """
-    X = pd.DataFrame(index=dados.index)
-
-    area = dados["Area"].clip(lower=1)   # evita divisao por zero
-
-    X["log_area"] = np.log1p(area)
-    X["chuva_anual"] = dados["Annual_Rainfall"]
-    X["log_fertilizante_ha"] = np.log1p(dados["Fertilizer"] / area)
-    X["log_pesticida_ha"] = np.log1p(dados["Pesticide"] / area)
-    X["ano"] = dados["Crop_Year"]
-
-    for coluna in COLUNAS_CATEGORICAS:
-        X[coluna] = dados[coluna]
-
-    return X
-
-
-def codificar_categoricas(X_treino, X_teste):
-    """
-    Converte cultura, safra e estado em colunas 0/1 (one-hot).
-
-    As categorias sao fixadas pelas que aparecem no TREINO, e o teste e
-    reindexado nessas mesmas colunas. Assim os dois conjuntos sempre tem as
-    mesmas colunas, na mesma ordem - se uma categoria so aparecesse no teste,
-    a rede receberia uma entrada que nunca viu e quebraria.
-    """
-    treino = pd.get_dummies(X_treino, columns=COLUNAS_CATEGORICAS, dtype=float)
-    teste = pd.get_dummies(X_teste, columns=COLUNAS_CATEGORICAS, dtype=float)
-    teste = teste.reindex(columns=treino.columns, fill_value=0.0)
-    return treino, teste
-
-
-def normalizar_dados(X_treino, X_teste):
-    """
-    Padroniza os dados (media 0, variancia 1), com fit SOMENTE no treino.
-    """
+    continuas = colunas_continuas(X_treino)
     scaler = StandardScaler()
-    scaler.fit(X_treino)
+    scaler.fit(X_treino[continuas])
 
-    X_treino_normalizado = pd.DataFrame(
-        scaler.transform(X_treino), columns=X_treino.columns, index=X_treino.index
-    )
-    X_teste_normalizado = pd.DataFrame(
-        scaler.transform(X_teste), columns=X_teste.columns, index=X_teste.index
-    )
-    return X_treino_normalizado, X_teste_normalizado, scaler
+    saidas = []
+    for X in (X_treino, X_validacao, X_teste):
+        X = X.copy()
+        X[continuas] = scaler.transform(X[continuas])
+        saidas.append(X.astype("float32"))
 
-
-def codificar_rotulo(y_treino, y_teste):
-    """
-    Converte a faixa ("baixa"/"media"/"alta") em inteiro (0, 1, 2).
-    """
-    encoder = LabelEncoder()
-    y_treino_cod = encoder.fit_transform(y_treino)
-    y_teste_cod = encoder.transform(y_teste)
-    return y_treino_cod, y_teste_cod, encoder
+    return saidas[0], saidas[1], saidas[2], scaler
 
 
 def checar_nan_inf(X, nome_conjunto):
     """
     Interrompe a execucao se sobrou NaN ou infinito depois das transformacoes.
     """
-    tem_nan = X.isna().any().any()
-    tem_inf = np.isinf(X.to_numpy(dtype=float)).any()
-
-    if tem_nan or tem_inf:
+    if X.isna().any().any() or np.isinf(X.to_numpy(dtype=float)).any():
         raise ValueError(f"Valores invalidos (NaN/Inf) encontrados em {nome_conjunto}!")
-
     print(f"{nome_conjunto}: nenhum valor NaN ou Inf encontrado.")
 
 
-def executar_pipeline(caminho_csv):
+def executar_pipeline(termos_phi=TERMOS_PHI):
     """
     Pipeline completo:
-    carregar -> agrupar culturas raras -> dividir -> criar faixas (medianas so
-    do treino) -> phi -> one-hot -> normalizar -> checar -> codificar rotulo.
+    carregar -> dividir (70/15/15) -> phi -> normalizar -> checar.
     """
-    print("1. Carregando dados...")
-    dados = carregar_dados(caminho_csv)
-    print(f"   Registros: {dados.shape[0]} | culturas: {dados[COLUNA_CULTURA].nunique()} "
-          f"| estados: {dados['State'].nunique()} | anos: {dados['Crop_Year'].min()}-{dados['Crop_Year'].max()}")
+    print("1. Carregando o Covertype (fetch_covtype)...")
+    X, y = carregar_dados()
+    print(f"   Celulas: {X.shape[0]} | variaveis: {X.shape[1]} | classes: {y.nunique()}")
+    majoritaria = y.value_counts(normalize=True).max()
+    print(f"   Chutar sempre a classe majoritaria acerta {majoritaria * 100:.1f}%")
 
-    print("2. Agrupando culturas raras...")
-    dados, raras = agrupar_culturas_raras(dados)
-    print(f"   Agrupadas ({len(raras)}) em '{ROTULO_OUTRAS}' | culturas restantes: "
-          f"{dados[COLUNA_CULTURA].nunique()}")
+    print("2. Dividindo em treino (70%), validacao (15%) e teste (15%)...")
+    X_tr, X_va, X_te, y_tr, y_va, y_te = dividir_treino_validacao_teste(X, y)
+    print(f"   Treino: {len(X_tr)} | Validacao: {len(X_va)} | Teste: {len(X_te)}")
 
-    print("3. Dividindo em treino (80%) e teste (20%)...")
-    dados_treino, dados_teste = dividir_treino_teste(dados)
-    print(f"   Treino: {len(dados_treino)} | Teste: {len(dados_teste)}")
+    print("3. Aplicando phi(X)...")
+    X_tr, X_va, X_te = phi(X_tr, termos_phi), phi(X_va, termos_phi), phi(X_te, termos_phi)
+    print(f"   Colunas: {X.shape[1]} -> {X_tr.shape[1]} "
+          f"(aspecto vira seno/cosseno, +distancia a agua, +elevacao x declividade)")
 
-    print("4. Criando as faixas de produtividade (medianas so do treino)...")
-    y_treino, y_teste, medianas = criar_faixas_produtividade(dados_treino, dados_teste)
-    distribuicao = y_treino.value_counts().reindex(NOMES_FAIXAS)
-    print(f"   Distribuicao no treino: {distribuicao.to_dict()}")
+    print("4. Normalizando so as colunas continuas (fit apenas no treino)...")
+    X_tr, X_va, X_te, scaler = normalizar_dados(X_tr, X_va, X_te)
+    print(f"   Continuas padronizadas: {len(colunas_continuas(X_tr))} | "
+          f"binarias mantidas: {len(COLUNAS_BINARIAS)}")
 
-    print("5. Aplicando phi(X)...")
-    X_treino = phi(dados_treino)
-    X_teste = phi(dados_teste)
-
-    print("6. Codificando categoricas (one-hot)...")
-    X_treino, X_teste = codificar_categoricas(X_treino, X_teste)
-    print(f"   Colunas finais: {X_treino.shape[1]}")
-
-    print("7. Normalizando (fit apenas no treino)...")
-    X_treino_final, X_teste_final, scaler = normalizar_dados(X_treino, X_teste)
-
-    print("8. Checando valores invalidos...")
-    checar_nan_inf(X_treino_final, "treino")
-    checar_nan_inf(X_teste_final, "teste")
-
-    print("9. Codificando rotulo (faixa -> inteiro)...")
-    y_treino_cod, y_teste_cod, encoder_rotulo = codificar_rotulo(y_treino, y_teste)
-    print(f"   Faixas: {list(encoder_rotulo.classes_)}")
+    print("5. Checando valores invalidos...")
+    checar_nan_inf(X_tr, "treino")
+    checar_nan_inf(X_va, "validacao")
+    checar_nan_inf(X_te, "teste")
 
     print("\nPipeline concluido.")
-    print(f"Formato final treino: {X_treino_final.shape}")
-    print(f"Formato final teste : {X_teste_final.shape}")
+    print(f"Formato final treino    : {X_tr.shape}")
+    print(f"Formato final validacao : {X_va.shape}")
+    print(f"Formato final teste     : {X_te.shape}")
 
-    return X_treino_final, X_teste_final, y_treino_cod, y_teste_cod, scaler, encoder_rotulo
+    return X_tr, X_va, X_te, y_tr.to_numpy(), y_va.to_numpy(), y_te.to_numpy(), scaler
 
 
 if __name__ == "__main__":
-    CAMINHO_DATASET = "dados/Crop_Yield_India.csv"
+    X_tr, X_va, X_te, y_tr, y_va, y_te, scaler = executar_pipeline()
 
-    X_treino, X_teste, y_treino, y_teste, scaler, encoder_rotulo = executar_pipeline(
-        CAMINHO_DATASET
-    )
-
-    print("\nPrimeiras linhas do treino ja processado:")
-    print(X_treino.head())
+    print("\nPrimeiras linhas do treino ja processado (colunas continuas):")
+    print(X_tr[colunas_continuas(X_tr)].head())
