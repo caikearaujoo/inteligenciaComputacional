@@ -1,0 +1,36 @@
+=== Receita vencedora: Muon lr 0,03, warmup + cosseno (87152 exemplos de teste) ===
+Acuracia simples   : 0.9443
+Acuracia balanceada: 0.9012
+F1 macro           : 0.9104
+                   precision    recall  f1-score   support
+
+       Spruce/Fir      0.947     0.939     0.943     31776
+   Lodgepole Pine      0.948     0.958     0.953     42495
+   Ponderosa Pine      0.927     0.947     0.937      5363
+Cottonwood/Willow      0.875     0.852     0.863       412
+            Aspen      0.884     0.803     0.842      1424
+      Douglas-fir      0.906     0.864     0.884      2605
+        Krummholz      0.955     0.944     0.950      3077
+
+         accuracy                          0.944     87152
+        macro avg      0.920     0.901     0.910     87152
+     weighted avg      0.944     0.944     0.944     87152
+
+=== Baseline: Adam lr 1e-3, constante (87152 exemplos de teste) ===
+Acuracia simples   : 0.9126
+Acuracia balanceada: 0.8638
+F1 macro           : 0.8689
+                   precision    recall  f1-score   support
+
+       Spruce/Fir      0.915     0.905     0.910     31776
+   Lodgepole Pine      0.922     0.931     0.927     42495
+   Ponderosa Pine      0.893     0.912     0.902      5363
+Cottonwood/Willow      0.843     0.833     0.838       412
+            Aspen      0.805     0.752     0.777      1424
+      Douglas-fir      0.813     0.806     0.809      2605
+        Krummholz      0.930     0.908     0.919      3077
+
+         accuracy                          0.913     87152
+        macro avg      0.874     0.864     0.869     87152
+     weighted avg      0.912     0.913     0.912     87152
+
