@@ -126,6 +126,6 @@ e os sinais de cada execução estão em `desafio3/logs/`.
 - `desafios/desafio01/`: submissão do Desafio 1.
 - `desafios/desafio2/`: submissão do Desafio 2, o harness do professor e o slide.
 - `desafio3/`: Desafio 3 (`treino.py` configurável, `experimentos.csv`, `logs/`,
-  `painel.pdf` e a apresentação em `slide.pdf`, a mesma também em `slide.html`).
+  `painel.pdf` e a apresentação em `slide.pdf`, gerada por `slide_html.py`).
   O `treino.py` importa a rede e o pipeline de `trabalhoFinal/`, então as duas
   pastas precisam estar juntas.

@@ -11,6 +11,9 @@ desafio3/desafio3.md
 *.log
 desafio3/logs_etapa*.txt
 
+# Intermediário do slide: o slide_html.py o recria a cada execução; o entregável é o slide.pdf
+desafio3/slide.html
+
 # Dataset (baixado localmente, não versionar)
 trabalhoFinal/dados/
 desafios/desafio2/dados/
