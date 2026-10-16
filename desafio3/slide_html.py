@@ -168,6 +168,11 @@ def montar_dados():
         "etapa4_200": int(len(d200)),
     }
 
+    # ---- tempo de CPU do protocolo (estimativa): mediana por otimizador x execucoes de 40 epocas
+    mediana = e40.groupby("otimizador").segundos.median()
+    h40 = float(sum(mediana[o] for o in e40.otimizador)) / 3600
+    cpu = {"h40": h40, "h200": 5 * h40}
+
     # ---- sinais do treino
     cv = {}
     for chave, nome in (("Muon", MUON), ("AdamW", ADAMW), ("SGD", SGD)):
@@ -196,6 +201,7 @@ def montar_dados():
         "n_exec": int(len(d)),
         "n_diverg": int(d.divergiu.sum()),
         "contagem": contagem,
+        "cpu": cpu,
         "seeds": {"baseline": sem_base, "adam": sem_adam, "adamw": sem_adamw, "muon": sem_muon},
         "mm": {k: media_desvio(v) for k, v in
                (("baseline", sem_base), ("adam", sem_adam), ("adamw", sem_adamw), ("muon", sem_muon))},
@@ -284,6 +290,21 @@ MODELO = r"""<!DOCTYPE html>
   .rot { font-size: 14px; font-weight: 600; }
   #dica { position: absolute; pointer-events: none; z-index: 20; background: var(--ink); color: var(--bg); font-size: 14px;
     padding: 7px 10px; border-radius: 8px; line-height: 1.4; opacity: 0; transition: opacity .1s; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  /* paginas 1 e 2: componentes novos */
+  .cadeia { display: flex; align-items: stretch; gap: 6px; margin-top: 4px; }
+  .cadeia .passo { flex: 1; background: var(--bg); border: 1px solid var(--borda); border-radius: 10px; padding: 8px 10px; font-size: 13.5px; line-height: 1.34; }
+  .cadeia .passo .et { font-size: 13px; font-weight: 700; color: var(--ink2); margin-bottom: 3px; }
+  .cadeia .passo.destaque { border-color: var(--muon); }
+  .cadeia.v { flex-direction: column; gap: 3px; }
+  .cadeia.v .passo { font-size: 14px; line-height: 1.36; padding: 6px 10px; }
+  .cadeia.v .passo .et { display: inline; margin: 0 6px 0 0; font-size: 14px; color: var(--ink); }
+  .cadeia.v .passo .et::after { content: ":"; }
+  .cadeia.v .seta { align-self: flex-start; font-size: 14px; line-height: .9; margin-left: 16px; }
+  .cadeia .seta { align-self: center; font-size: 20px; color: var(--ink2); }
+  ul.legenda { list-style: none; margin: 6px 0 0; padding: 0; font-size: 16px; line-height: 1.3; }
+  ul.legenda li { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+  ul.legenda .desc { font-size: 13px; color: var(--ink2); }
+  .mini { background: var(--bg); border: 1px solid var(--borda); border-radius: 10px; padding: 10px 12px; }
   /* interface (some na impressao) */
   .ui { position: fixed; z-index: 50; }
   #barra { right: 14px; bottom: 6px; display: flex; gap: 6px; align-items: center; opacity: .45; transition: opacity .2s; }
@@ -323,7 +344,7 @@ MODELO = r"""<!DOCTYPE html>
     <div class="cab"><h1>1 · Ponto de partida: por que o Covertype e o que precisamos treinar</h1>
       <div class="sub">Trocamos de dataset para ter um problema com espaço para aplicar a disciplina; o Desafio 3 pergunta como treinar bem a rede que esse problema comporta</div></div>
 
-    <div class="bloco" style="left:40px; top:104px; width:800px; height:432px;">
+    <div class="bloco" style="left:40px; top:104px; width:800px; height:436px;">
       <h2>Por que mudamos de dataset</h2>
       <table class="t" style="font-size:16px">
         <tr><th></th><th>Dataset inicial</th><th>Forest Covertype (atual)</th></tr>
@@ -337,38 +358,37 @@ MODELO = r"""<!DOCTYPE html>
       <div class="texto" style="font-size:16px; margin-top:8px"><b>O que o Covertype dá:</b> volume para uma rede de tamanho razoável dentro dessa regra, classes desbalanceadas como no mundo real e margem para evoluir. Queríamos dar mais <b>espaço para aplicar os conceitos da disciplina</b> (inicialização, ativação, otimizadores).</div>
     </div>
 
-    <div class="bloco" style="left:860px; top:104px; width:700px; height:432px;">
+    <div class="bloco" style="left:860px; top:104px; width:700px; height:436px;">
       <h2>O problema e a rede que vamos treinar</h2>
-      <div class="texto" style="font-size:15.5px; margin-top:2px">Cada exemplo é uma célula de terreno de 30×30 m (Colorado), descrita por relevo, distâncias e solo. <b>Objetivo da rede:</b> dizer qual das <b>7 coberturas vegetais</b> (tipos de floresta) domina ali. Mesma ideia de antes (condições do terreno → categoria), num problema maior.</div>
+      <div class="texto" style="font-size:15.5px; margin-top:2px">Cada exemplo é uma célula de terreno de 30×30 m de uma floresta dos EUA (Colorado), descrita por <b>elevação, distâncias até a água e a focos de incêndio, sombreamento, tipo de solo</b> e outras variáveis. <b>Objetivo da rede:</b> dizer qual das <b>7 coberturas vegetais</b> domina ali.</div>
       <svg id="svgRede" width="664" height="176" style="margin-top:4px"></svg>
-      <ul class="lista curta" id="lRede" style="font-size:15.5px; margin-top:4px"></ul>
+      <ul class="lista curta" id="lRede" style="font-size:14px; margin-top:2px; line-height:1.36"></ul>
     </div>
 
-    <div class="bloco" style="left:40px; top:552px; width:520px; height:308px;">
-      <h2>Onde o Desafio 3 entra</h2>
-      <div class="texto" style="font-size:16px">A rede, a ativação (tanh) e a inicialização (calibrada, do Desafio 2) já estão definidas. O Desafio 3 muda só <b>como a rede é treinada</b>: o otimizador e a agenda do lr.</div>
-      <div class="linha"></div>
-      <div class="texto" style="font-size:16px; margin-top:0">O enunciado pede como <b>baseline</b> a “receita atual do grupo”: o treino padrão do nosso projeto, <b>Adam, lr 1e-3, agenda constante</b>, sem ajuste nenhum. A pergunta é se existe uma receita melhor e, se existir, <b>por que</b> ela é melhor.</div>
-      <div class="pequeno" style="margin-top:10px"><b>Receita</b> = a combinação de otimizador + lr + agenda. <b>Baseline</b> = a receita de referência, contra a qual medimos todo ganho.</div>
-    </div>
-
-    <div class="bloco" style="left:580px; top:552px; width:980px; height:308px;">
-      <h2>Termos que aparecem nos slides</h2>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0 28px">
-        <ul class="lista curta" style="font-size:15px; margin-top:4px">
-          <li><b>Otimizador</b>: a regra que usa o gradiente para atualizar os pesos (SGD, Adam, AdamW, Muon).</li>
-          <li><b>lr</b> (taxa de aprendizado): o tamanho do passo. <b>Agenda</b>: como o lr muda ao longo do treino.</li>
-          <li><b>Passo / época</b>: 1 passo = 1 lote de 512 exemplos; 1 época = 795 passos (uma volta nos dados).</li>
-          <li><b>Validação / teste</b>: a validação decide as escolhas; o teste é medido uma única vez, no fim.</li>
-          <li><b>Semente</b>: sorteia a inicialização e a ordem dos lotes. O desvio entre sementes mostra quanto o resultado muda só por sorte.</li>
-        </ul>
-        <ul class="lista curta" style="font-size:15px; margin-top:4px">
-          <li><b>F1</b>: nota de 0 a 1 do acerto numa classe (equilibra falsos alarmes e casos perdidos). <b>F1 macro</b>: média das 7 classes; as raras pesam igual às grandes.</li>
-          <li><b>ρ</b> = ‖Δθ‖/‖θ‖: tamanho relativo do passo (referência do enunciado: 1e‑3). <b>‖θ‖</b>: norma dos pesos.</li>
-          <li><b>Muon</b>: o passo das matrizes ocultas é ortogonalizado, então todas as direções andam o mesmo tanto.</li>
-          <li><b>Warmup + cosseno</b>: o lr sobe em 5% do treino e depois desce suave até 0.</li>
-        </ul>
+    <div class="bloco" style="left:40px; top:552px; width:520px; height:326px;">
+      <h2>Como a rede aprende</h2>
+      <div class="texto" style="font-size:14.5px; margin-top:0">Treinar é <b>ajustar esses 16 mil parâmetros para o erro cair</b>:</div>
+      <div class="cadeia v">
+        <div class="passo"><div class="et">1 · Função de perda</div>Mede o quanto a rede errou. Transforma os 7 números em probabilidades: é <b>alta</b> quando a rede dá pouca probabilidade à cobertura certa e <b>baixa</b> quando dá muita.</div>
+        <div class="seta">↓</div>
+        <div class="passo"><div class="et">2 · Gradiente</div>Para cada peso, para onde a perda cresce.</div>
+        <div class="seta">↓</div>
+        <div class="passo destaque"><div class="et">3 · Otimizador</div>A regra que usa o gradiente para atualizar os pesos a cada passo. O que muda de um para outro é o <b>tamanho e a direção do passo</b>: é o que o Desafio 3 compara.</div>
       </div>
+    </div>
+
+    <div class="bloco" style="left:580px; top:552px; width:480px; height:326px;">
+      <h2>Ativação: trocamos o ReLU pelo tanh <span class="pequeno" style="font-weight:400">(Desafio 2)</span></h2>
+      <svg id="svgAtiv" width="444" height="112"></svg>
+      <ul class="lista curta" id="lAtiv" style="font-size:14px; margin-top:4px; line-height:1.34"></ul>
+    </div>
+
+    <div class="bloco" style="left:1080px; top:552px; width:480px; height:326px;">
+      <h2>Baseline: o ponto de comparação</h2>
+      <div class="texto" style="font-size:15px; margin-top:2px">O enunciado pede para manter a <b>receita atual do grupo</b>, mas ainda não tínhamos uma, porque tínhamos acabado de trocar de dataset. Então definimos o treino padrão: <b>Adam, lr 1e-3, agenda constante</b>. Essa é a nossa <b>baseline</b>.</div>
+      <div class="linha"></div>
+      <div class="texto" style="font-size:15px; margin-top:0">Durante o desenvolvimento, comparamos tudo com ela e buscamos uma <b>receita melhor</b> (otimizador + lr + agenda): é o que o Desafio 3 pede.</div>
+      <div class="pequeno" style="margin-top:12px; font-size:14px">A pergunta é se existe uma receita melhor e, se existir, <b>por que</b> ela é melhor.</div>
     </div>
     <div class="npag">1 / 4</div>
   </section>
@@ -378,23 +398,37 @@ MODELO = r"""<!DOCTYPE html>
     <div class="cab"><h1>2 · O que o desafio pedia e como respondemos</h1>
       <div class="sub" id="sub2"></div></div>
 
-    <div class="bloco" style="left:40px; top:104px; width:1520px; height:92px; padding-top:10px">
-      <div class="texto" style="font-size:16.5px; margin-top:0"><b>Pergunta do enunciado:</b> qual combinação de otimizador e agenda de lr treina melhor a nossa rede, e <b>por quê</b>, lido nos sinais do treino (perda, gradiente, ‖θ‖, ρ e lr efetivo)?
-      <b>Otimizadores:</b> SGD (com e sem Nesterov), Adam, AdamW e Muon (obrigatório). <b>Agendas:</b> constante, cosseno, warmup + cosseno e uma à escolha (<b>WSD</b>).</div>
+    <div class="bloco" style="left:40px; top:100px; width:610px; height:284px;">
+      <h2>O que o enunciado pede para comparar</h2>
+      <div style="display:grid; grid-template-columns:1.3fr 1fr; gap:0 18px; margin-top:2px">
+        <div><div class="etapa">Otimizadores</div><ul class="legenda" id="lOtim"></ul></div>
+        <div><div class="etapa">Agendas de lr</div><ul class="legenda" id="lAg"></ul></div>
+      </div>
     </div>
 
-    <div class="bloco" style="left:40px; top:210px; width:362px; height:262px;" id="et1"></div>
-    <div class="bloco" style="left:426px; top:210px; width:362px; height:262px;" id="et2"></div>
-    <div class="bloco" style="left:812px; top:210px; width:362px; height:262px;" id="et3"></div>
-    <div class="bloco" style="left:1198px; top:210px; width:362px; height:262px;" id="et4"></div>
+    <div class="bloco" style="left:666px; top:100px; width:894px; height:284px;">
+      <h2>Agendas: como o lr muda ao longo do treino <span class="pequeno" style="font-weight:400">(fração do lr máximo)</span></h2>
+      <div style="display:flex; gap:22px; align-items:flex-start">
+        <svg id="svgCurvas" width="470" height="214" style="flex:none"></svg>
+        <div class="texto" style="font-size:15.5px; margin-top:0" id="tWsd"></div>
+      </div>
+    </div>
 
-    <div class="bloco" style="left:40px; top:486px; width:640px; height:374px;">
+    <div class="bloco" style="left:40px; top:398px; width:610px; height:248px;">
+      <h2>Por que 40 épocas em tudo (e 200 só para confirmar)</h2>
+      <div id="tempoCpu"></div>
+      <div class="texto" style="font-size:15px; margin-top:8px" id="tEpocas"></div>
+    </div>
+
+    <div class="bloco" style="left:666px; top:398px; width:894px; height:248px;">
+      <h2>O protocolo do enunciado, em 4 etapas</h2>
+      <div id="etapas" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-top:4px"></div>
+    </div>
+
+    <div class="bloco" style="left:40px; top:658px; width:1520px; height:206px;">
       <h2>Regras do enunciado e como cumprimos</h2>
-      <ul class="lista curta" id="regras" style="font-size:15px; margin-top:4px"></ul>
-    </div>
-    <div class="bloco" style="left:700px; top:486px; width:860px; height:374px;">
-      <h2>O que ficou aberto: nossas escolhas e o porquê</h2>
-      <ul class="lista curta" id="escolhas" style="font-size:15px; margin-top:4px"></ul>
+      <div id="regras" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:10px 14px; margin-top:4px"></div>
+      <div class="pequeno" style="margin-top:12px; font-size:14px"><b>Outras decisões nossas</b> (registro a cada 25 passos, só o lr ajustado, sementes extras de AdamW e Adam): estão nas notas (tecla N).</div>
     </div>
     <div class="npag">2 / 4</div>
   </section>
@@ -629,6 +663,84 @@ function desenharRede() {
   texto(svg, 0, 12, "cada seta = uma matriz de pesos (e o otimizador que a atualiza)", { class: "tick" });
 }
 
+/* ---------- pagina 1: ReLU x tanh ---------- */
+function desenharAtivacao() {
+  const svg = $("svgAtiv"); svg.innerHTML = "";
+  const W = +svg.getAttribute("width"), H = +svg.getAttribute("height"), m = { l: 30, r: 8, t: 6, b: 20 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, x0 = -3, x1 = 3, y0 = -1.4, y1 = 3;
+  const sx = v => m.l + (v - x0) / (x1 - x0) * iw, sy = v => m.t + ih * (1 - (v - y0) / (y1 - y0));
+  [-1, 0, 1, 2, 3].forEach(v => {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), class: "grade" }, svg);
+    texto(svg, m.l - 6, sy(v) + 4, String(v).replace("-", "−"), { "text-anchor": "end", class: "tick" });
+  });
+  [-3, -2, -1, 0, 1, 2, 3].forEach(v => texto(svg, sx(v), H - 4, String(v).replace("-", "−"), { "text-anchor": "middle", class: "tick" }));
+  svgEl("line", { x1: sx(0), x2: sx(0), y1: m.t, y2: H - m.b, stroke: cor("--ink2"), "stroke-width": 1 }, svg);
+  [-1, 1].forEach(v => svgEl("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), stroke: cor("--ag2"), "stroke-width": 1, "stroke-dasharray": "4 4", opacity: .8 }, svg));
+  const curva = (fn, c, w) => {
+    let d = "";
+    for (let i = 0; i <= 120; i++) { const x = x0 + (x1 - x0) * i / 120; d += (i ? "L" : "M") + sx(x).toFixed(1) + " " + sy(fn(x)).toFixed(1); }
+    svgEl("path", { d, fill: "none", stroke: cor(c), "stroke-width": w, "stroke-linejoin": "round" }, svg);
+  };
+  curva(x => Math.max(0, x), "--neutro", 2.6);
+  curva(x => Math.tanh(x), "--ag2", 3);
+  texto(svg, sx(-2.9), sy(2.55), "ReLU: zera os", { class: "rot", fill: cor("--ink2") });
+  texto(svg, sx(-2.9), sy(1.75), "negativos, sem teto", { class: "rot", fill: cor("--ink2") });
+  texto(svg, sx(0.3), sy(-0.82), "tanh: limitada entre −1 e 1", { class: "rot", fill: cor("--ag2") });
+}
+
+/* ---------- pagina 2: legendas e curvas das agendas ---------- */
+const AGEST = { constante: ["constante", "--neutro", "5 4", 2], cosseno: ["cosseno", "--ag2", "", 2.6], warmup_cosseno: ["warmup + cosseno", "--c2", "", 2.6], wsd: ["WSD (nossa escolha)", "--ag4", "", 3.4] };
+function desenharLegendas() {
+  const icone = (forma, c) => { const sv = svgEl("svg", { width: 18, height: 18 }); marca(sv, forma, 9, 9, 6, cor(c)); return sv.outerHTML; };
+  const desc = { sgd: "passo ∝ gradiente", sgd_nesterov: "", adam: "passo normalizado", adamw: "Adam + weight decay", muon: "passo ortogonalizado" };
+  const nomes = { sgd: "SGD", sgd_nesterov: "SGD Nesterov", adam: "Adam", adamw: "AdamW", muon: "Muon (obrigatório)" };
+  $("lOtim").innerHTML = ["sgd", "sgd_nesterov", "adam", "adamw", "muon"].map(k =>
+    "<li>" + icone(OPT[k][2], OPT[k][1]) + "<span><b>" + nomes[k] + "</b>" + (desc[k] ? " <span class='desc'>" + desc[k] + "</span>" : "") + "</span></li>").join("");
+  $("lAg").innerHTML = AGENDAS.map(a => {
+    const [nome, c, dash, w] = AGEST[a];
+    const sv = svgEl("svg", { width: 26, height: 14 });
+    svgEl("line", { x1: 1, x2: 25, y1: 7, y2: 7, stroke: cor(c), "stroke-width": w, "stroke-dasharray": dash }, sv);
+    return "<li>" + sv.outerHTML + "<span><b>" + nome + "</b></span></li>";
+  }).join("");
+}
+function desenharCurvasAgenda() {
+  const svg = $("svgCurvas"); svg.innerHTML = "";
+  const W = +svg.getAttribute("width"), H = +svg.getAttribute("height"), m = { l: 36, r: 8, t: 10, b: 36 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const sx = t => m.l + t * iw, sy = v => m.t + ih * (1 - v);
+  const aq = 0.05, est = 0.8;
+  const f = {
+    constante: t => 1,
+    cosseno: t => 0.5 * (1 + Math.cos(Math.PI * t)),
+    warmup_cosseno: t => t < aq ? t / aq : 0.5 * (1 + Math.cos(Math.PI * (t - aq) / (1 - aq))),
+    wsd: t => t < aq ? t / aq : (t < est ? 1 : Math.max(0, (1 - t) / (1 - est)))
+  };
+  [0, 0.5, 1].forEach(v => {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: sy(v), y2: sy(v), class: "grade" }, svg);
+    texto(svg, m.l - 6, sy(v) + 4, String(v).replace(".", ","), { "text-anchor": "end", class: "tick" });
+  });
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => texto(svg, sx(t), H - 18, Math.round(t * 100) + "%", { "text-anchor": "middle", class: "tick" }));
+  texto(svg, m.l + iw / 2, H - 2, "tempo de treino", { "text-anchor": "middle", class: "tick" });
+  ["constante", "cosseno", "warmup_cosseno", "wsd"].forEach(a => {
+    const [nome, c, dash, w] = AGEST[a];
+    let d = "";
+    for (let i = 0; i <= 200; i++) { const t = i / 200; d += (i ? "L" : "M") + sx(t).toFixed(1) + " " + sy(f[a](t)).toFixed(1); }
+    svgEl("path", { d, fill: "none", stroke: cor(c), "stroke-width": w, "stroke-dasharray": dash, "stroke-linejoin": "round" }, svg);
+  });
+  texto(svg, sx(0.55), sy(0.74), "WSD: alto até 80%", { class: "rot", fill: cor("--ag4") });
+  texto(svg, sx(0.04), sy(0.34), "cosseno: desce desde o início", { class: "rot", fill: cor("--ag2") });
+  const guia = svgEl("line", { y1: m.t, y2: m.t + ih, stroke: cor("--ink"), "stroke-width": 1, opacity: 0 }, svg);
+  const area = svgEl("rect", { x: m.l, y: m.t, width: iw, height: ih, fill: "transparent" }, svg);
+  area.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / escala, t = Math.max(0, Math.min(1, (px - m.l) / iw));
+    let html = "<b>" + Math.round(t * 100) + "% do treino</b>";
+    ["constante", "cosseno", "warmup_cosseno", "wsd"].forEach(a => { html += "<br><span style='color:" + cor(AGEST[a][1]) + "'>●</span> " + AGEST[a][0] + ": " + fmt(f[a](t), 2); });
+    guia.setAttribute("x1", px); guia.setAttribute("x2", px); guia.setAttribute("opacity", .5);
+    mostrarDica(html, ev);
+  });
+  area.addEventListener("mouseleave", () => { guia.setAttribute("opacity", 0); esconderDica(); });
+}
+
 /* ---------- pagina 3: ganho por semente (40 epocas) ---------- */
 const media = v => v.reduce((a, b) => a + b, 0) / v.length;
 const desvio = v => { const m = media(v); return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length); };
@@ -797,36 +909,43 @@ function preencherTextos() {
 
   /* pagina 1 */
   $("lRede").innerHTML = [
-    "<b>16.135 parâmetros</b> (57×128+128, 128×64+64 e 64×7+7): cerca de <b>25 exemplos de treino por parâmetro</b> (406.708 de treino). As 54 variáveis originais viram 57 entradas no pré-processamento.",
-    "Classes desbalanceadas: chutar sempre a mais comum acerta <b>48,8%</b>, por isso medimos o <b>F1 macro</b>."].map(s => "<li>" + s + "</li>").join("");
+    "<b>Cada camada oculta</b> multiplica pelos pesos, soma o viés e aplica a <b>tanh</b>. A camada de saída só multiplica e soma, e entrega um <b>vetor de 7 números (logits)</b>, um por cobertura: a <b>posição do maior número</b> é a cobertura prevista.",
+    "<b>16.135 parâmetros</b> (pesos e vieses de cada camada): cerca de <b>25 exemplos de treino por parâmetro</b> (406.708). Os 57 valores de entrada vêm das 54 variáveis originais, com as contínuas padronizadas."].map(s => "<li>" + s + "</li>").join("");
+  $("lAtiv").innerHTML = [
+    "Testamos as ativações com <b>3 sementes cada</b>, na validação. A ideia de testar o tanh veio das <b>apresentações dos colegas</b> (muita gente o usou).",
+    "O tanh foi a <b>melhor</b>: 3 desvios ou mais acima do GELU e do ReLU.",
+    "Ele <b>limita o sinal entre −1 e 1</b>, o que ajuda a manter o treino estável."].map(s => "<li>" + s + "</li>").join("");
 
   /* pagina 2 */
   $("sub2").textContent = "O enunciado define o protocolo em 4 etapas; o que ficou aberto nós decidimos e declaramos · " + c.total + " execuções reportadas, " + (D.n_diverg === 0 ? "nenhuma divergiu" : D.n_diverg + " divergiram");
-  const cartao = (id, et, titulo, corpo, res) => { $(id).innerHTML = "<div class='etapa'>" + et + "</div><h2 style='margin-top:4px'>" + titulo + "</h2><div class='texto' style='font-size:15px'>" + corpo +
-    "</div><div class='linha' style='margin:10px 0'></div><div class='texto' style='font-size:15px; margin-top:0'>" + res + "</div>"; };
-  cartao("et1", "Etapa 1", "Baseline com 3 sementes", "A “receita atual do grupo”, como o enunciado pede: o treino padrão do projeto (Adam, lr 1e-3, agenda constante), com 3 sementes.", "<b>" + c.etapa1 + " execuções</b> · F1 " + fmt(bm) + " ± " + fmt(bs));
-  cartao("et2", "Etapa 2", "Varredura de lr", "Cada otimizador com 5 a 7 valores de lr em escala log (warmup + cosseno, 1 semente). O melhor do SGD caiu na borda, então estendemos a grade até 3,0.",
-    "<b>" + c.etapa2 + " execuções</b> · melhor: Muon lr " + lrTxt(melhor("muon").lr) + " (" + fmt(melhor("muon").f1) + ")");
-  cartao("et3", "Etapa 3", "Agendas", "As 4 agendas (constante, cosseno, warmup + cosseno, WSD) no AdamW (lr 0,01) e no Muon (lr 0,03), cada um no seu melhor lr, 1 semente.",
-    "<b>" + c.etapa3 + " execuções novas</b> · vence warmup + cosseno nos dois");
-  cartao("et4", "Etapa 4", "Confirmação com 3 sementes", "As melhores combinações com 3 sementes; incluímos AdamW e Adam no mesmo lr e agenda para separar o efeito de cada ingrediente. Mais o complemento de 200 épocas.",
-    "<b>" + (c.etapa4_40 + c.etapa4_200) + " execuções</b> (" + c.etapa4_40 + " de 40 épocas, " + c.etapa4_200 + " de 200) · vencedora: " + fmt(mm) + " ± " + fmt(ms));
+  const cartao = (et, titulo, corpo, res) => "<div class='mini'><div class='etapa'>" + et + "</div><div style='font-size:16.5px; font-weight:700; line-height:1.2; margin:3px 0 6px'>" + titulo +
+    "</div><div class='texto' style='font-size:13.5px; margin-top:0; line-height:1.36'>" + corpo + "</div><div class='linha' style='margin:8px 0'></div><div class='texto' style='font-size:13.5px; margin-top:0; line-height:1.36'>" + res + "</div></div>";
+  $("etapas").innerHTML = [
+    cartao("Etapa 1", "Baseline", "A receita do grupo: Adam, lr 1e-3, constante. 3 sementes.", "<b>" + c.etapa1 + " execuções</b><br>F1 " + fmt(bm) + " ± " + fmt(bs)),
+    cartao("Etapa 2", "Varredura de lr", "5 a 7 lrs por otimizador (warmup + cosseno, 1 semente). O SGD caiu na borda: estendemos.", "<b>" + c.etapa2 + " execuções</b><br>melhor: Muon, lr " + lrTxt(melhor("muon").lr)),
+    cartao("Etapa 3", "Agendas", "As 4 agendas no AdamW e no Muon, cada um no seu melhor lr.", "<b>" + c.etapa3 + " execuções</b><br>vence warmup + cosseno"),
+    cartao("Etapa 4", "Confirmação", "As melhores, com 3 sementes, mais AdamW e Adam como controle e 200 épocas.", "<b>" + (c.etapa4_40 + c.etapa4_200) + " execuções</b><br>" + c.etapa4_40 + " de 40 e " + c.etapa4_200 + " de 200 épocas")].join("");
   $("regras").innerHTML = [
-    "<span class='ok'>✓</span> <b>lr ajustado por otimizador</b>: varredura própria de cada um (o Muon, sobre o melhor lr do AdamW).",
-    "<span class='ok'>✓</span> <b>Mesmo orçamento</b> (passos e lote) em todas as comparações.",
-    "<span class='ok'>✓</span> <b>Escolha na validação</b>; o teste foi usado <b>uma única vez</b>, no fim.",
-    "<span class='ok'>✓</span> <b>Tudo reportado</b>, inclusive o que falhou: " + (D.n_diverg === 0 ? "nenhuma execução divergiu; o SGD com lr 3,0 colapsou (F1 " + fmt(D.instavel.f1, 2) + ")" : D.n_diverg + " divergiram") + ".",
-    "<span class='ok'>✓</span> <b>Só há vencedor se a diferença supera a variação entre sementes</b>: +" + fmt(mm - bm, 3) + " contra desvios de " + fmt(ms, 4) + " e " + fmt(bs, 4) + ".",
-    "<span class='ok'>✓</span> <b>Muon incluído</b> (<code>torch.optim.Muon</code>, só nas matrizes 2-D ocultas; vieses e saída no AdamW).",
-    "<span class='ok'>✓</span> <b>Reprodutível</b>: cada linha do <code>experimentos.csv</code> traz o comando exato."].map(s => "<li style='list-style:none; margin-left:-22px'>" + s + "</li>").join("");
+    "<b>lr ajustado</b> por otimizador (Muon sobre o melhor lr do AdamW)",
+    "<b>Mesmo orçamento</b> (passos e lote) em todas as comparações",
+    "<b>Validação decide</b>; teste usado <b>uma única vez</b>",
+    "<b>Tudo reportado</b>: " + (D.n_diverg === 0 ? "nenhuma divergiu; SGD lr 3,0 colapsou (F1 " + fmt(D.instavel.f1, 2) + ")" : D.n_diverg + " divergiram"),
+    "<b>Vencedor só se o ganho supera o desvio</b>: +" + fmt(mm - bm, 3) + " contra " + fmt(ms, 4) + " e " + fmt(bs, 4),
+    "<b>Muon incluído</b> (<code>torch.optim.Muon</code>, só nas matrizes ocultas)",
+    "<b>Reprodutível</b>: cada linha do <code>experimentos.csv</code> traz o comando exato",
+    "<b>Agenda à escolha</b>: WSD, que contrasta com o cosseno"].map(t => "<div class='mini' style='padding:9px 12px; font-size:14.5px; line-height:1.32'><span class='ok'>✓</span> " + t + "</div>").join("");
   const custo = D.e200.custo.toFixed(1).replace(".", ",");
-  $("escolhas").innerHTML = [
-    "<b>Orçamento de 40 épocas (31.800 passos, lote 512) em tudo:</b> o protocolo exige dezenas de execuções e o Muon custa ~" + custo + "× mais por época na CPU. Usamos o mesmo orçamento em baseline, varredura e confirmação para comparar igual com igual.",
-    "<b>WSD como 4ª agenda:</b> está nas leituras do enunciado e contrasta com as outras: tem o platô do lr constante e a queda final do cosseno.",
-    "<b>Registro a cada 25 passos:</b> o enunciado permite de 10 a 50; dá ~1.270 pontos por execução, curvas suaves sem inflar os logs.",
-    "<b>Só o lr foi ajustado:</b> mexer em mais coisas impediria saber o que causou o ganho. Momento e weight decay ficaram nos valores padrão.",
-    "<b>Sementes extras de AdamW e Adam:</b> o top-3 da etapa 3 era todo Muon; sem elas, “Muon > AdamW” ficaria apoiado em 1 semente.",
-    "<b>Complemento de 200 épocas:</b> em 40 épocas a rede ainda não saturou. O enunciado só permite reduzir o orçamento nas etapas 2 e 3, então declaramos e medimos a diferença."].map(s => "<li>" + s + "</li>").join("");
+  const h40 = D.cpu.h40, h200 = D.cpu.h200, larg = 270, horas = v => v.toFixed(1).replace(".", ",");
+  $("tempoCpu").innerHTML = "<div style='display:grid; grid-template-columns:172px 1fr; gap:8px 10px; align-items:center; margin-top:2px'>" +
+    "<div style='font-size:15px'><b>40 épocas</b> em tudo<div class='pequeno' style='font-size:13px'>o que usamos</div></div>" +
+    "<div style='display:flex; align-items:center; gap:8px'><div style='height:22px; width:" + Math.round(larg * h40 / h200) + "px; background:var(--ok); border-radius:4px'></div><b class='num' style='font-size:17px'>≈ " + horas(h40) + " h</b></div>" +
+    "<div style='font-size:15px'><b>200 épocas</b> em tudo<div class='pequeno' style='font-size:13px'>estimativa: 5× o tempo</div></div>" +
+    "<div style='display:flex; align-items:center; gap:8px'><div style='height:22px; width:" + larg + "px; background:var(--neutro); border-radius:4px'></div><b class='num' style='font-size:17px'>≈ " + horas(h200) + " h</b></div></div>" +
+    "<div class='pequeno' style='margin-top:6px; font-size:13px'>Tempo de CPU do protocolo inteiro (sem GPU).</div>";
+  $("tEpocas").innerHTML = "O Muon é o mais lento (~" + custo + "× por época). Usamos <b>40 épocas, igual para todos</b>; depois <b>confirmamos com 200 épocas só a vencedora e a baseline</b>, porque ficava a dúvida se a vantagem do Muon era só aprender mais rápido.";
+  $("tWsd").innerHTML = "<b>Cosseno:</b> começa a baixar o lr desde o início, suave, até 0.<br><br>" +
+    "<b>WSD (nossa escolha):</b> sobe (warmup), <b>mantém o lr alto por 80%</b> do treino e só cai no final.<br><br>" +
+    "Escolhemos o WSD porque está nas leituras do enunciado e contrasta com o cosseno. Ele não ganhou, mas mostrou que o que importa é a <b>queda do lr até perto de 0 no fim</b>.";
 
   /* pagina 3 */
   $("t3").textContent = "3 · O que encontramos: Muon + queda do lr dá +" + fmt(mm - bm, 3) + " de F1 sobre a baseline";
@@ -869,15 +988,25 @@ function preencherTextos() {
 
 /* ---------- notas e dados (gaveta) ---------- */
 const NOTAS = [
-`<h3>Página 1 · de onde partimos (~1 min)</h3>
-<p><b>Dataset.</b> Mudamos quatro vezes de dataset, sempre por um motivo medido: o Kaggle era saturado (98,6%), o da Etiópia tinha sinal fraco, o da Índia não deixava ter uma rede maior dentro da regra de ~20 exemplos por parâmetro. O Covertype (581 mil células, 7 classes) resolve isso: 16 mil parâmetros com ~25 exemplos por parâmetro.</p>
-<p><b>Rede.</b> 57→128→64→7. O Muon só mexe nas 2 matrizes ocultas; vieses e saída ficam no AdamW.</p>
-<p><b>Desafio 3.</b> A rede e a inicialização já estavam definidas. O que muda é como treinar: otimizador e agenda de lr. A baseline é Adam, lr 1e-3, constante.</p>
-<p style="color:var(--ink2)">Use o quadro "Termos" se alguém perguntar o que é F1, ρ ou semente.</p>`,
-`<h3>Página 2 · o que o enunciado pedia (~1 min)</h3>
-<p>O enunciado definiu o protocolo: 4 etapas (baseline, varredura de lr, agendas, confirmação com 3 sementes) e as regras (mesmo orçamento, validação decide, teste uma vez, reportar tudo, só há vencedor se o ganho supera a variação entre sementes). Os cartões mostram o que fizemos em cada etapa e quantas execuções.</p>
-<p><b>O que ficou aberto e decidimos</b> (quadro da direita): orçamento de 40 épocas, WSD, registro a cada 25 passos, só o lr ajustado, sementes extras de AdamW e Adam e o complemento de 200 épocas. Cada item tem o motivo escrito no slide.</p>
-<p><b>Se perguntarem por que 40 épocas em tudo:</b> o enunciado só autoriza reduzir nas etapas 2 e 3; usamos 40 em todas por custo de CPU (o Muon é ~9× mais lento) e declaramos isso, com o complemento de 200 épocas.</p>`,
+`<h3>Página 1 · de onde partimos</h3>
+<p><b>Dataset.</b> Trocamos porque o antigo era pequeno e saturado (98,6%): com pouca margem, nada do que a disciplina ensina aparecia. O Covertype (581 mil células, 7 classes desbalanceadas) tem espaço para evoluir a cada desafio.</p>
+<p><b>Tema.</b> Cada linha é um terreno de 30×30 m (elevação, distâncias até a água, focos de incêndio, sombreamento, tipo de solo). A rede diz qual das 7 coberturas domina ali.</p>
+<p><b>Rede.</b> 57 valores (as contínuas padronizadas) → 128 → 64 → 7. Camadas ocultas: multiplicam pelos pesos, somam o viés e aplicam a tanh. A saída só multiplica e soma e entrega 7 números (logits); o maior indica a cobertura. ~16 mil parâmetros, ~25 exemplos de treino por parâmetro.</p>
+<p><b>Como a rede aprende (quadro de baixo).</b> A função de perda mede o erro: alta quando a rede dá pouca probabilidade à cobertura certa e baixa quando dá muita. O gradiente diz, para cada peso, para onde a perda cresce. O otimizador usa o gradiente para atualizar os pesos a cada passo; o que muda de um para outro é o tamanho e a direção do passo. É isso que o Desafio 3 compara.</p>
+<p><b>Troca do ReLU pelo tanh (Desafio 2).</b> Testamos as ativações com 3 sementes cada; a ideia de testar o tanh veio das apresentações dos colegas. O tanh foi o melhor (3 desvios ou mais acima do GELU e do ReLU). É coerente com o Desafio 2: ele limita o sinal entre −1 e 1, o que ajuda a manter o treino estável. Se perguntarem a causa: medimos que ganha; a explicação é essa, mas não isolamos a causa.</p>
+<p><b>Se perguntarem qual é a função de perda:</b> é a entropia cruzada, a perda padrão de classificação. Para cada exemplo ela olha só a probabilidade que a rede deu à cobertura certa e calcula <b>menos o log</b> dela: se a rede deu 90% à certa, a perda é pequena (~0,1); se deu 1%, é grande (~4,6). Por isso é alta quando a rede erra com confiança e baixa quando acerta. O Softmax, que transforma os 7 números em probabilidades, já vem embutido nela.</p>
+<p><b>Baseline.</b> O enunciado pede a "receita atual do grupo"; como tínhamos acabado de trocar de dataset, não havia. Definimos o treino padrão: Adam, lr 1e-3, constante. Durante o desenvolvimento comparamos tudo com ela e buscamos uma receita melhor, que é o que o Desafio 3 pede.</p>
+<h3>Glossário (os termos que saíram do slide)</h3>
+<p><b>Otimizador:</b> a regra que usa o gradiente para atualizar os pesos (SGD, Adam, AdamW, Muon). <b>lr</b> (taxa de aprendizado): o tamanho do passo. <b>Agenda:</b> como o lr muda ao longo do treino. <b>Receita:</b> otimizador + lr + agenda; <b>baseline:</b> a receita de referência.</p>
+<p><b>Passo / época:</b> 1 passo = 1 lote de 512 exemplos; 1 época = 795 passos (uma volta nos dados). <b>Validação / teste:</b> a validação decide as escolhas; o teste é medido uma única vez, no fim. <b>Semente:</b> sorteia a inicialização e a ordem dos lotes; o desvio entre sementes mostra quanto o resultado muda só por sorte.</p>
+<p><b>F1:</b> nota de 0 a 1 do acerto numa classe (equilibra falsos alarmes e casos perdidos). <b>F1 macro:</b> média das 7 classes; as raras pesam igual às grandes. <b>ρ</b> = ‖Δθ‖/‖θ‖: tamanho relativo do passo (referência do enunciado: 1e‑3). <b>‖θ‖:</b> norma dos pesos.</p>
+<p><b>Muon:</b> o passo das matrizes ocultas é ortogonalizado, então todas as direções andam o mesmo tanto. <b>Warmup + cosseno:</b> o lr sobe em 5% do treino e depois desce suave até 0.</p>`,
+`<h3>Página 2 · o que o desafio pedia</h3>
+<p><b>Comparar</b> (quadro de cima, à esquerda, para ler): SGD (com e sem Nesterov), Adam, AdamW e Muon; agendas constante, cosseno, warmup + cosseno e uma à escolha. O Muon atua só nas 2 matrizes ocultas; vieses e saída ficam no AdamW.</p>
+<p><b>WSD (gráfico).</b> Escolhemos porque está nas leituras do enunciado e contrasta com o cosseno: o cosseno baixa o lr desde o começo; o WSD mantém o lr alto por 80% e só cai no final. Não ganhou, mas mostrou que o que importa é a queda do lr até perto de zero no fim.</p>
+<p><b>40 épocas em tudo e 200 para confirmar (quadro da esquerda, embaixo).</b> Treinamos na CPU, sem GPU, e o Muon é o mais lento. O protocolo inteiro leva ~2 h com 40 épocas e passaria de 10 h com 200. Por isso 40 em todas as etapas, igual para todos, e depois 200 só na vencedora e na baseline, porque ficava a dúvida se a vantagem do Muon era só aprender mais rápido.</p>
+<p><b>Outras decisões nossas.</b> Registro a cada 25 passos (o enunciado permite de 10 a 50: ~1.270 pontos por execução). Só o lr foi ajustado: momento e weight decay ficaram nos padrões, para saber o que causou o ganho. Sementes extras de AdamW e Adam: o top-3 da etapa 3 era todo Muon; sem elas, “Muon > AdamW” ficaria apoiado em 1 semente.</p>
+<p><b>Protocolo e regras.</b> As 4 etapas e as regras do enunciado estão nos quadros de baixo, com quantas execuções foram feitas. Se perguntarem: o enunciado só autoriza reduzir o orçamento nas etapas 2 e 3; usamos 40 em todas e declaramos isso.</p>`,
 `<h3>Página 3 · o que encontramos (~1 min)</h3>
 <p><b>Receita e ganho (esquerda).</b> Muon lr 0,03 + AdamW lr 0,01 + warmup/cosseno: F1 0,9121 ± 0,0009 contra 0,8646 ± 0,0028; ~16× o desvio. Teste (usado uma vez): 0,9104 contra 0,8689.</p>
 <p><b>Caminho até ela (meio e direita).</b> Etapa 2: o melhor lr de cada otimizador, todos no interior da grade. Etapa 3: com lr constante o Muon perde do AdamW; a vantagem exige a queda do lr. Etapa 4: confirmação com 3 sementes; cosseno puro empata com warmup + cosseno.</p>`,
@@ -950,7 +1079,7 @@ function ajustar() {
   p.style.top = Math.max(0, (window.innerHeight - 900 * escala) / 2) + "px";
 }
 function desenharTudo() {
-  desenharRede(); desenharSementes(); desenharVarredura(); desenharAgendas(); desenharConfirmacao();
+  desenharRede(); desenharAtivacao(); desenharLegendas(); desenharCurvasAgenda(); desenharSementes(); desenharVarredura(); desenharAgendas(); desenharConfirmacao();
   desenharDecomposicao(); desenharD1(); desenharLimitacoes();
 }
 function trocarTema() {
